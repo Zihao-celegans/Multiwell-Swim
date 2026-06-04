@@ -29,6 +29,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 
 import cv2
@@ -134,11 +135,31 @@ def run_new_roi(frame: np.ndarray, num_row: int, num_col: int,
 
     Mirrors MATLAB Auto Selection (case 1), but instead of drawing circles
     the user clicks the centre of each corner well and types the radius.
+
+    Loop structure:
+      Outer loop — re-click the 4 corners (only if user asks to redo corners).
+      Inner loop — re-enter radius and re-preview without re-clicking corners.
     """
     roi_list = None
-    happy = False
 
-    while not happy:
+    # ── Prompt for grid dimensions ───────────────────────────────────────────
+    # Mirrors MATLAB inputdlg({'Number of Rows', 'Number of Columns'}).
+    # CLI values are used as defaults; user can override interactively.
+    while True:
+        try:
+            raw = input(f"\n[ROI] Number of rows    [default {num_row}]: ").strip()
+            num_row = int(raw) if raw else num_row
+            raw = input(f"[ROI] Number of columns [default {num_col}]: ").strip()
+            num_col = int(raw) if raw else num_col
+            if num_row < 2 or num_col < 2:
+                print("  Rows and columns must each be at least 2.")
+                continue
+            break
+        except ValueError:
+            print("  Please enter whole numbers.")
+    print(f"[ROI] Grid set to {num_row} rows × {num_col} columns = {num_row * num_col} wells.")
+
+    while True:   # outer: redo corner clicks
         # ── Step A: collect 4 corner clicks ─────────────────────────────────
         fig, ax = plt.subplots(figsize=(13, 8))
         ax.imshow(frame, cmap="gray", aspect="equal", interpolation="nearest")
@@ -167,47 +188,88 @@ def run_new_roi(frame: np.ndarray, num_row: int, num_col: int,
         print(f"  LL : ({ll[0]:.1f},  {ll[1]:.1f})")
         print(f"  LR : ({lr[0]:.1f},  {lr[1]:.1f})")
 
-        # ── Step B: get radius ───────────────────────────────────────────────
-        # MATLAB: Radius = mean([ULr URr LLr LRr])  (mean of 4 drawn-circle radii)
-        # Here: single typed value (same radius for all wells, per design choice).
-        while True:
-            try:
-                raw = input("\n[ROI] Enter well radius in pixels [default 30]: ").strip()
-                radius = float(raw) if raw else 30.0
-                if radius <= 0:
-                    print("  Radius must be positive.")
-                    continue
-                break
-            except ValueError:
-                print("  Please enter a number.")
-
-        # ── Step C: interpolate grid ─────────────────────────────────────────
-        roi_list = _interpolate_grid(ul, ur, ll, lr, radius, num_row, num_col)
-
-        # ── Step D: preview overlay ──────────────────────────────────────────
-        fig2, ax2 = plt.subplots(figsize=(13, 8))
-        ax2.imshow(frame, cmap="gray", aspect="equal", interpolation="nearest")
-        ax2.set_xticks([])
-        ax2.set_yticks([])
-        ax2.set_title(
-            f"ROI Preview — {num_row}×{num_col} = {num_row * num_col} wells  "
-            f"|  Radius = {radius:.1f} px  |  Close window to continue",
+        # ── Confirm corner clicks ────────────────────────────────────────────
+        # Show a quick preview with just the 4 corner markers before proceeding.
+        fig_c, ax_c = plt.subplots(figsize=(13, 8))
+        ax_c.imshow(frame, cmap="gray", aspect="equal", interpolation="nearest")
+        ax_c.set_xticks([])
+        ax_c.set_yticks([])
+        ax_c.set_title(
+            "Corner positions preview  |  Close window to continue",
             fontsize=11,
         )
-        _draw_overlay(ax2, roi_list, corner_pts=[ul, ur, ll, lr])
+        for (x, y) in [ul, ur, ll, lr]:
+            ax_c.plot(x, y, "*m", markersize=12, markeredgewidth=1.0)
         plt.tight_layout()
-        fig2.canvas.manager.set_window_title("ROI Detection — Preview")
+        fig_c.canvas.manager.set_window_title("ROI Detection — Corner Confirmation")
         plt.show()
 
-        # ── Step E: confirm ──────────────────────────────────────────────────
-        ans = input("\n[ROI] Happy with the ROI? (1 = yes, 0 = redo): ").strip()
-        happy = ans == "1"
-        if not happy:
-            print("[ROI] Restarting ROI selection…\n")
+        ans_c = input("\n[ROI] Happy with the corner positions? (1 = yes, 0 = redo): ").strip()
+        if ans_c != "1":
+            print("[ROI] Restarting corner selection…\n")
+            continue   # outer loop: redo clicks
 
-    save_roi(roi_list, num_row, num_col, output_path)
-    print(f"[ROI] Saved to: {output_path}")
-    return roi_list
+        # Default radius carried across inner iterations
+        radius = 190.0
+
+        while True:   # inner: redo radius without re-clicking corners
+            # ── Step B: get radius ───────────────────────────────────────────
+            # MATLAB: Radius = mean([ULr URr LLr LRr])  (mean of 4 drawn-circle radii)
+            # Here: single typed value (same radius for all wells, per design choice).
+            while True:
+                try:
+                    raw = input(f"\n[ROI] Enter well radius in pixels [default {radius:.0f}]: ").strip()
+                    new_radius = float(raw) if raw else radius
+                    if new_radius <= 0:
+                        print("  Radius must be positive.")
+                        continue
+                    radius = new_radius
+                    break
+                except ValueError:
+                    print("  Please enter a number.")
+
+            # ── Step C: interpolate grid ─────────────────────────────────────
+            roi_list = _interpolate_grid(ul, ur, ll, lr, radius, num_row, num_col)
+
+            # ── Step D: preview overlay ──────────────────────────────────────
+            fig2, ax2 = plt.subplots(figsize=(13, 8))
+            ax2.imshow(frame, cmap="gray", aspect="equal", interpolation="nearest")
+            ax2.set_xticks([])
+            ax2.set_yticks([])
+            ax2.set_title(
+                f"ROI Preview — {num_row}×{num_col} = {num_row * num_col} wells  "
+                f"|  Radius = {radius:.1f} px  |  Close window to continue",
+                fontsize=11,
+            )
+            _draw_overlay(ax2, roi_list, corner_pts=[ul, ur, ll, lr])
+            plt.tight_layout()
+            fig2.canvas.manager.set_window_title("ROI Detection — Preview")
+            plt.show()
+
+            # ── Step E: confirm ──────────────────────────────────────────────
+            print("\n[ROI] Happy with the ROI?")
+            print("  1 = yes, save and finish")
+            print("  2 = re-enter radius (keep same corner clicks)")
+            print("  3 = redo corner clicks from scratch")
+            ans = input("Choice: ").strip()
+
+            if ans == "1":
+                if os.path.exists(output_path):
+                    ans_ow = input(
+                        f"\n[ROI] '{output_path}' already exists. Overwrite? (1 = yes, 0 = no): "
+                    ).strip()
+                    if ans_ow != "1":
+                        print("[ROI] Save cancelled. Continuing without saving.")
+                        return roi_list
+                save_roi(roi_list, num_row, num_col, output_path)
+                print(f"[ROI] Saved to: {output_path}")
+                return roi_list
+            elif ans == "2":
+                print("[ROI] Re-entering radius…")
+                continue   # inner loop: ask for radius again
+            else:
+                print("[ROI] Restarting corner selection…\n")
+                break       # break inner loop → outer loop re-clicks corners
 
 
 def run_load_roi(frame: np.ndarray, load_path: str, output_path: str) -> list:
@@ -254,8 +316,9 @@ def main():
     )
     parser.add_argument("--video", required=True,
                         help="Path to a sample video file (.avi).")
-    parser.add_argument("--output", default="roi_info.json",
-                        help="Output path for roi_info.json.")
+    parser.add_argument("--output", default=None,
+                        help="Output path for roi_info.json. "
+                             "Defaults to <video_stem>_roi_info.json in the same folder as the video.")
     parser.add_argument("--load", default=None,
                         help="Load an existing roi_info.json instead of picking a new ROI.")
     parser.add_argument("--num_row", type=int, default=8,
@@ -267,6 +330,14 @@ def main():
     print(f"[ROI] Reading first frame from: {args.video}")
     frame = _read_first_frame(args.video)
     print(f"[ROI] Image size: {frame.shape[1]} x {frame.shape[0]} (W x H)")
+
+    # Default output: <video_folder>/<video_stem>_roi_info.json
+    if args.output is None:
+        stem = os.path.splitext(os.path.basename(args.video))[0]
+        args.output = os.path.join(
+            os.path.dirname(os.path.abspath(args.video)),
+            stem + "_roi_info.json",
+        )
 
     if args.load:
         run_load_roi(frame, args.load, args.output)
