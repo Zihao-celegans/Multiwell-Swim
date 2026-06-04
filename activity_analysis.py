@@ -377,14 +377,30 @@ def analyse(video_path: str, roi_path: str, output_path: str,
     vid_mtime = os.path.getmtime(video_path)
     vid_date  = datetime.fromtimestamp(vid_mtime).strftime("%d-%b-%Y %H:%M:%S")
 
+    # ── Full per-frame timecourse (num_roi × num_frames) ────────────────────
+    # Stored as a list-of-lists (one list per well, length = num_frames).
+    # NaN encoded as null for JSON compatibility.
+    # Only the valid transition columns (0 … num_frames-2) carry real data;
+    # the last column is NaN and is included so the shape is unambiguous.
+    def _to_json_list(arr2d):
+        """Convert a 2-D float array to a nested list, NaN → None."""
+        return [
+            [None if np.isnan(v) else float(v) for v in row]
+            for row in arr2d
+        ]
+
     result = {
         # Core fields (mirrors MATLAB struct S)
         "Vidname"   : os.path.basename(video_path),
         "FrameRate" : fps,
         "FrameSkip" : frame_skip,   # NOTE: MATLAB has a bug where FrameRate is
                                      # overwritten by frameSkip; we store both correctly.
-        "ActVal"    : act_val_2d.tolist(),    # 8×12 list-of-lists
-        "ActValS"   : act_val_s_2d.tolist(),  # 8×12 list-of-lists
+        "ActVal"    : act_val_2d.tolist(),    # 8×12 list-of-lists (mean per well)
+        "ActValS"   : act_val_s_2d.tolist(),  # 8×12 list-of-lists (mean per well)
+        # Full timecourse: num_roi lists, each of length num_frames.
+        # Index order matches roi_list (row-major: A1, A2, …, H12).
+        # Time axis: frame index t → time (s) = t / fps.
+        "ActValS_timecourse": _to_json_list(act_val_s),  # (num_roi, num_frames)
         "date"      : vid_date,
         # Reserved for future steps (Step 3 & 4) — stored as null
         "Freq"      : None,
