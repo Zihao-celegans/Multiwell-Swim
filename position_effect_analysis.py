@@ -123,7 +123,7 @@ def main():
     slope, intercept, r, p, se = stats.linregress(x, y)
     xs = np.linspace(x.min(), x.max(), 100)
     ax.plot(xs, slope * xs + intercept, color="firebrick", linewidth=2,
-            label=f"linear fit: r={r:+.3f}, p={p:.4f}")
+            label=f"linear fit: r={r:+.3f}, R²={r**2:.3f}, p={p:.4f}")
     ax.legend(loc="best", fontsize=9)
 
     ax.set_xlabel("Distance from plate centroid (pixels)", fontsize=11)
