@@ -115,12 +115,13 @@ def collect_values_by_worm_count(
 # Plot
 # ---------------------------------------------------------------------------
 
-def plot_activity_by_worm_count(
+def _box_strip_plot(
     values_by_n: dict[int, list[float]],
-    metric: str,
+    ylabel: str,
     title: str,
     save_path: str = None,
 ) -> None:
+    """Shared strip + box plot renderer, one group per worm count N."""
     worm_counts = sorted(values_by_n.keys())
     data = [values_by_n[n] for n in worm_counts]
 
@@ -150,7 +151,7 @@ def plot_activity_by_worm_count(
     ax.set_xticks(positions)
     ax.set_xticklabels([str(n) for n in worm_counts])
     ax.set_xlabel("Worms per well (N)", fontsize=11)
-    ax.set_ylabel(f"{metric} — Active pixels (A.U.)", fontsize=11)
+    ax.set_ylabel(ylabel, fontsize=11)
     ax.set_title(title, fontsize=13)
 
     plt.tight_layout()
@@ -159,6 +160,43 @@ def plot_activity_by_worm_count(
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[PlotByN] Saved: {save_path}")
     plt.show()
+
+
+def plot_activity_by_worm_count(
+    values_by_n: dict[int, list[float]],
+    metric: str,
+    title: str,
+    save_path: str = None,
+) -> None:
+    """Raw per-well activity, grouped by worm count N."""
+    _box_strip_plot(
+        values_by_n,
+        ylabel=f"{metric} — Active pixels (A.U.)",
+        title=title,
+        save_path=save_path,
+    )
+
+
+def plot_activity_per_worm(
+    values_by_n: dict[int, list[float]],
+    metric: str,
+    title: str,
+    save_path: str = None,
+) -> None:
+    """Per-worm activity (well activity / N), grouped by worm count N.
+
+    Highlights whether activity scales linearly with worm count or
+    saturates/declines at higher densities (e.g. crowding effects).
+    """
+    per_worm_by_n = {
+        n: [v / n for v in values] for n, values in values_by_n.items()
+    }
+    _box_strip_plot(
+        per_worm_by_n,
+        ylabel=f"{metric} / N — Active pixels per worm (A.U.)",
+        title=title,
+        save_path=save_path,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -217,20 +255,28 @@ def main():
     print("\n[PlotByN] Summary:")
     for n in sorted(values_by_n):
         vals = values_by_n[n]
+        per_worm_vals = [v / n for v in vals]
         print(f"  N={n:>3}  count={len(vals):>3}  "
-              f"mean={np.mean(vals):.2f}  std={np.std(vals):.2f}")
+              f"mean={np.mean(vals):.2f}  std={np.std(vals):.2f}  "
+              f"|  per-worm mean={np.mean(per_worm_vals):.2f}  "
+              f"std={np.std(per_worm_vals):.2f}")
 
+    stem = os.path.splitext(os.path.basename(args.results[0]))[0]
+    stem_dir = os.path.dirname(os.path.abspath(args.results[0]))
+
+    # ── Figure: raw activity vs. worm count ──────────────────────────────────
     title = f"{args.metric} vs. Worm Count  ({len(args.results)} video(s))"
-
     save_path = args.output
     if save_path is None and args.save:
-        stem = os.path.splitext(os.path.basename(args.results[0]))[0]
-        save_path = os.path.join(
-            os.path.dirname(os.path.abspath(args.results[0])),
-            f"{stem}_{args.metric}_by_N.png",
-        )
-
+        save_path = os.path.join(stem_dir, f"{stem}_{args.metric}_by_N.png")
     plot_activity_by_worm_count(values_by_n, args.metric, title, save_path=save_path)
+
+    # ── Figure: per-worm activity (activity / N) vs. worm count ─────────────
+    per_worm_title = f"{args.metric} per Worm vs. Worm Count  ({len(args.results)} video(s))"
+    per_worm_save_path = None
+    if args.save:
+        per_worm_save_path = os.path.join(stem_dir, f"{stem}_{args.metric}_per_worm_by_N.png")
+    plot_activity_per_worm(values_by_n, args.metric, per_worm_title, save_path=per_worm_save_path)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,11 @@ MATLAB original logic (faithfully mirrored below):
 
        Same with ImgDifSkip → ActValS(n, NumA-1)   (when NumA > 1+frameSkip)
 
+       Deviation from raw MATLAB: if the (2R+1)×(2R+1) crop extends past
+       the frame edges (e.g. plate row placed a few pixels beyond the
+       image boundary), the out-of-frame portion is zero-filled ("no
+       activity") instead of discarding the whole well with NaN.
+
 4. Average over frame-transitions:
        ActVal_avg  = mean(ActVal,  2, 'omitnan')   → (NumROI,)
        ActValS_avg = mean(ActValS, 2, 'omitnan')   → (NumROI,)
@@ -135,23 +140,43 @@ def _roi_activity(img_dif: np.ndarray, roi: dict,
     NaN values in img_dif propagate through the convolution, then
     NaN > noise_threshold evaluates to False (0), matching MATLAB behaviour.
 
-    Returns NaN if the crop would exceed the image boundaries (safety guard;
-    MATLAB would raise an index error in this case).
+    Wells whose (2R+1)×(2R+1) crop extends past the image edges (e.g. a
+    plate row placed a few pixels beyond the frame boundary) are handled by
+    treating the out-of-frame portion of the crop as zero — i.e. "no
+    activity" — rather than discarding the whole well. This is an
+    intentional deviation from raw MATLAB (which would raise an index
+    error); only the truly out-of-frame pixels are zero-filled, the
+    in-frame pixels are used as-is.
+
+    Returns NaN only if the ROI's centre + radius crop does not overlap the
+    image at all (i.e. the well is entirely outside the frame).
     """
     xc = int(round(roi["center"][0]))
     yc = int(round(roi["center"][1]))
     R  = int(round(roi["radius"]))
 
     img_h, img_w = img_dif.shape
+    size = 2 * R + 1
 
-    # Bounds check (MATLAB does not have this; added as safety guard)
-    if yc - R < 0 or yc + R >= img_h or xc - R < 0 or xc + R >= img_w:
+    # Desired crop window — may extend past the image edges.
+    y0, y1 = yc - R, yc + R + 1          # exclusive end
+    x0, x1 = xc - R, xc + R + 1
+
+    # Clip to the valid image range.
+    y0_clip, y1_clip = max(y0, 0), min(y1, img_h)
+    x0_clip, x1_clip = max(x0, 0), min(x1, img_w)
+
+    if y0_clip >= y1_clip or x0_clip >= x1_clip:
+        # Well is entirely outside the frame — nothing to measure.
         return np.nan
 
-    # Square crop — matches MATLAB ImgDif(yc-R:yc+R, xc-R:xc+R)
-    # MATLAB colon is end-inclusive; Python slice upper bound is exclusive → +1
-    roi_dif = img_dif[yc - R : yc + R + 1,
-                      xc - R : xc + R + 1]          # shape: (2R+1, 2R+1)
+    # Zero-fill the full (2R+1)x(2R+1) window, then paste in whatever part
+    # of the crop actually falls inside the image. Pixels outside the frame
+    # stay 0 (treated as "no activity").
+    roi_dif = np.zeros((size, size), dtype=img_dif.dtype)
+    py0, px0 = y0_clip - y0, x0_clip - x0
+    py1, px1 = py0 + (y1_clip - y0_clip), px0 + (x1_clip - x0_clip)
+    roi_dif[py0:py1, px0:px1] = img_dif[y0_clip:y1_clip, x0_clip:x1_clip]
 
     # 2-D convolution, zero-padded — mirrors MATLAB conv2(..., 'same')
     roi_smoothed = convolve2d(roi_dif, gau,
