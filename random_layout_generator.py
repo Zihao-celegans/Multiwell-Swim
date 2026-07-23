@@ -16,11 +16,14 @@ import csv
 import random
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+
 
 ROW_LABELS = tuple("ABCDEFGH")
 NUM_COLUMNS = 12
-DEFAULT_WORM_COUNTS = tuple(range(5, 41, 5))
-DEFAULT_WELLS_PER_CONDITION = 8
+DEFAULT_WORM_COUNTS = tuple(range(5, 16, 5))
+DEFAULT_WELLS_PER_CONDITION = 24
 
 
 def all_wells() -> list[str]:
@@ -96,6 +99,90 @@ def write_layout_csv(layout: dict[int, list[str]], output_path: str | Path) -> N
                 writer.writerow((worm_count, well))
 
 
+def plot_layout(
+    layout: dict[int, list[str]],
+    output_path: str | Path | None = None,
+    show: bool = True,
+) -> None:
+    """Draw a color-coded 8x12 plate diagram of the well layout.
+
+    Each worm-count condition is assigned a distinct color, and unassigned
+    wells are drawn in light gray.
+
+    Args:
+        layout: Mapping of worm count to assigned well labels, as returned
+            by generate_layout.
+        output_path: Optional path to save the figure as an image file.
+        show: Whether to display the figure interactively.
+    """
+    well_to_condition: dict[str, int] = {
+        well: worm_count
+        for worm_count, wells in layout.items()
+        for well in wells
+    }
+
+    conditions = list(layout.keys())
+    cmap = plt.get_cmap("tab10" if len(conditions) <= 10 else "tab20")
+    condition_colors = {
+        worm_count: cmap(index % cmap.N)
+        for index, worm_count in enumerate(conditions)
+    }
+    unassigned_color = "0.9"
+
+    fig, ax = plt.subplots(figsize=(NUM_COLUMNS * 0.7, len(ROW_LABELS) * 0.7))
+
+    for row_index, row_label in enumerate(ROW_LABELS):
+        for column in range(1, NUM_COLUMNS + 1):
+            well = f"{row_label}{column}"
+            condition = well_to_condition.get(well)
+            color = condition_colors.get(condition, unassigned_color)
+            x, y = column, len(ROW_LABELS) - row_index
+
+            circle = Circle((x, y), 0.4, facecolor=color, edgecolor="black", linewidth=0.8)
+            ax.add_patch(circle)
+            ax.text(x, y, well, ha="center", va="center", fontsize=7)
+
+    ax.set_xlim(0.3, NUM_COLUMNS + 0.7)
+    ax.set_ylim(0.3, len(ROW_LABELS) + 0.7)
+    ax.set_xticks(range(1, NUM_COLUMNS + 1))
+    ax.set_yticks(range(1, len(ROW_LABELS) + 1))
+    ax.set_yticklabels(reversed(ROW_LABELS))
+    ax.set_aspect("equal")
+    ax.xaxis.set_ticks_position("top")
+    ax.xaxis.set_label_position("top")
+    ax.set_title("96-Well Plate Layout", pad=20)
+
+    legend_handles = [
+        plt.Line2D(
+            [0], [0],
+            marker="o",
+            color="w",
+            markerfacecolor=condition_colors[worm_count],
+            markeredgecolor="black",
+            markersize=10,
+            label=f"{worm_count} worms",
+        )
+        for worm_count in conditions
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        title="Condition",
+        borderaxespad=0,
+    )
+
+    fig.tight_layout()
+
+    if output_path:
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved plate diagram to {output_path}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
 def _print_layout(layout: dict[int, list[str]]) -> None:
     """Print a compact human-readable layout."""
     print("worm_count  wells")
@@ -119,6 +206,16 @@ def main() -> None:
         type=Path,
         help="Optional CSV file to write the generated layout to.",
     )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Display a color-coded plate diagram of the layout.",
+    )
+    parser.add_argument(
+        "--plot-output",
+        type=Path,
+        help="Optional image file (e.g. PNG) to save the plate diagram to.",
+    )
     args = parser.parse_args()
 
     layout = generate_layout(seed=args.seed)
@@ -126,6 +223,9 @@ def main() -> None:
     if args.output:
         write_layout_csv(layout, args.output)
         print(f"\nSaved layout to {args.output}")
+
+    if args.plot or args.plot_output:
+        plot_layout(layout, output_path=args.plot_output, show=args.plot)
 
 
 if __name__ == "__main__":
