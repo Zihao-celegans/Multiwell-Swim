@@ -42,9 +42,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from random_layout_generator import ROW_LABELS
+from random_layout_generator import ROW_LABELS, generate_layout
+from plot_activity_by_worm_count import load_layout_from_csv, well_to_worm_count_map
 
 TIMESTAMP_RE = re.compile(r"(\d{2})-(\d{2})-(\d{2})")
+FIGSIZE_4_3 = (8, 6)  # Fixed 4:3 aspect ratio for saved figures
 
 
 # ---------------------------------------------------------------------------
@@ -77,9 +79,19 @@ def well_labels(num_row: int, num_col: int) -> list:
     return [f"{ROW_LABELS[r]}{c + 1}" for r in range(num_row) for c in range(num_col)]
 
 
-def load_time_points(results_paths: list, metric: str, censor: set) -> list:
+def load_time_points(
+    results_paths: list,
+    metric: str,
+    censor: set,
+    well_to_group: dict | None = None,
+) -> list:
     """Return a list of dicts, one per video, sorted by recording time:
     {"vidname", "seconds", "elapsed_min", "values": np.ndarray of per-well activity}.
+
+    If well_to_group is given (well label -> group key, e.g. from
+    random_layout_generator.py's layout), each point also gets a
+    "values_by_group" dict mapping group key -> np.ndarray of that
+    group's per-well activity values.
     """
     points = []
     for path in results_paths:
@@ -99,14 +111,29 @@ def load_time_points(results_paths: list, metric: str, censor: set) -> list:
             for well, val in zip(labels, flat)
         ])
 
-        points.append({
+        point = {
             "path": path,
             "vidname": vidname,
             "seconds": seconds,
             "values": flat[keep],
             "n_total": len(labels),
             "n_censored": len(censor & set(labels)),
-        })
+        }
+
+        if well_to_group is not None:
+            values_by_group: dict[object, list] = {}
+            for well, val, keep_flag in zip(labels, flat, keep):
+                if not keep_flag:
+                    continue
+                group = well_to_group.get(well)
+                if group is None:
+                    continue
+                values_by_group.setdefault(group, []).append(val)
+            point["values_by_group"] = {
+                group: np.array(vals) for group, vals in values_by_group.items()
+            }
+
+        points.append(point)
 
     points.sort(key=lambda p: p["seconds"])
     t0 = points[0]["seconds"]
@@ -120,9 +147,9 @@ def load_time_points(results_paths: list, metric: str, censor: set) -> list:
 # Plot
 # ---------------------------------------------------------------------------
 
-def plot_activity_by_time(points: list, metric: str, title: str, save_path: str = None) -> None:
+def plot_activity_by_time(points: list, metric: str, save_path: str = None) -> None:
     n_groups = len(points)
-    fig, ax = plt.subplots(figsize=(max(7, n_groups * 1.3), 6))
+    fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
     rng = np.random.default_rng(0)
 
     positions = np.arange(1, n_groups + 1)
@@ -145,17 +172,86 @@ def plot_activity_by_time(points: list, metric: str, title: str, save_path: str 
             ax.text(pos + 0.25, float(np.median(values)),
                     f"n={len(values)}", va="center", fontsize=8, color="dimgray")
 
-    labels = [f"{p['elapsed_min']:.0f} min" for p in points]
+    labels = [f"{p['elapsed_min']:.0f}" for p in points]
     ax.set_xticks(positions)
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_xlabel("Elapsed time since first video (min)", fontsize=11)
-    ax.set_ylabel(f"{metric} — Active pixels (A.U.)", fontsize=11)
-    ax.set_title(title, fontsize=13)
+    ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
 
     plt.tight_layout()
 
     if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=150)
+        print(f"[ActivityByTime] Saved: {save_path}")
+    plt.show()
+
+
+def plot_activity_by_time_grouped(
+    points: list,
+    metric: str,
+    condition_labels: dict,
+    save_path: str = None,
+) -> None:
+    """Box + strip plot of per-well activity vs. elapsed time, with one
+    box (plus jittered individual points) per condition at each time point.
+
+    Args:
+        points: Time points from load_time_points(..., well_to_group=...),
+            each with a "values_by_group" dict.
+        condition_labels: Mapping of group key (e.g. worm-count int from the
+            layout) -> display label (e.g. drug concentration), in the
+            desired legend order.
+    """
+    n_groups = len(points)
+    n_conditions = len(condition_labels)
+    fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
+    cmap = plt.get_cmap("tab10")
+    rng = np.random.default_rng(0)
+
+    box_width = 0.7 / n_conditions
+    cluster_positions = np.arange(1, n_groups + 1)
+
+    for idx, (group_key, label) in enumerate(condition_labels.items()):
+        color = cmap(idx % cmap.N)
+        offset = (idx - (n_conditions - 1) / 2) * box_width
+        positions = cluster_positions + offset
+
+        data = [
+            p.get("values_by_group", {}).get(group_key, np.array([]))
+            for p in points
+        ]
+
+        ax.boxplot(
+            data, positions=positions, widths=box_width * 0.85, patch_artist=True,
+            medianprops=dict(color="white", linewidth=1.5),
+            boxprops=dict(facecolor=color, alpha=0.6, edgecolor=color),
+            whiskerprops=dict(color=color),
+            capprops=dict(color=color),
+            flierprops=dict(marker=""),
+        )
+
+        for pos, values in zip(positions, data):
+            if not len(values):
+                continue
+            jitter = rng.uniform(-box_width * 0.3, box_width * 0.3, size=len(values))
+            ax.scatter(pos + jitter, values, color=color, s=12, alpha=0.6,
+                       zorder=3, edgecolors="none")
+
+        # Proxy artist so the legend shows a swatch per condition
+        # (boxplot patches aren't directly usable as legend handles).
+        ax.plot([], [], color=color, marker="s", linestyle="", markersize=8, label=label)
+
+    labels = [f"{p['elapsed_min']:.0f}" for p in points]
+    ax.set_xticks(cluster_positions)
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_xlabel("Elapsed time (min)", fontsize=11)
+    ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    ax.legend(title="Condition", loc="best")
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300)
         print(f"[ActivityByTime] Saved: {save_path}")
     plt.show()
 
@@ -181,6 +277,26 @@ def main():
                         help="Well labels to exclude from every time point "
                              "(e.g. no/insufficient worms), "
                              "e.g. --censor G10 G11 G12 H1 H2 H3 H4 H5 H6 H7 H8 H9 H10 H11 H12")
+    parser.add_argument("--by_condition", action="store_true",
+                        help="Group wells by condition (worm-count layout produced by "
+                             "random_layout_generator.py, e.g. used here as drug-dose groups) "
+                             "instead of pooling all wells together.")
+    parser.add_argument("--layout", default=None,
+                        help="Path to a layout CSV saved by random_layout_generator.py "
+                             "(--output). If omitted, the layout is regenerated with --seed. "
+                             "Only used with --by_condition.")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Seed used with random_layout_generator.py, used to regenerate "
+                             "the layout when --layout is not given. Only used with --by_condition.")
+    parser.add_argument("--worm_counts", type=int, nargs="+", default=None,
+                        help="Worm-count conditions used with random_layout_generator.py "
+                             "(e.g. 5 10 15). Defaults to the generator's default. "
+                             "Only used with --by_condition.")
+    parser.add_argument("--labels", nargs="+", default=None,
+                        help="Display label for each condition, matching the sorted "
+                             "--worm_counts order (e.g. --labels \"0 mM\" \"0.2 mM\" \"2 mM\"). "
+                             "Defaults to the worm-count numbers themselves. Only used with "
+                             "--by_condition.")
     parser.add_argument("--save", action="store_true",
                         help="Save the figure as a PNG.")
     parser.add_argument("--output", default=None,
@@ -195,7 +311,34 @@ def main():
         out_dir = os.path.dirname(os.path.abspath(results_paths[0]))
 
     censor = set(args.censor)
-    points = load_time_points(results_paths, args.metric, censor)
+
+    condition_labels = None
+    well_to_group = None
+    if args.by_condition:
+        if args.layout:
+            print(f"[ActivityByTime] Loading layout from CSV: {args.layout}")
+            layout = load_layout_from_csv(args.layout)
+        else:
+            kwargs = {"seed": args.seed}
+            if args.worm_counts:
+                kwargs["worm_counts"] = tuple(args.worm_counts)
+            print(f"[ActivityByTime] Regenerating layout with seed={args.seed}, "
+                  f"worm_counts={kwargs.get('worm_counts', 'default')}")
+            layout = generate_layout(**kwargs)
+
+        well_to_group = well_to_worm_count_map(layout)
+        group_keys = sorted(layout.keys())
+        if args.labels:
+            if len(args.labels) != len(group_keys):
+                raise SystemExit(
+                    f"[ActivityByTime] --labels has {len(args.labels)} entries but the "
+                    f"layout has {len(group_keys)} conditions {group_keys}."
+                )
+            condition_labels = dict(zip(group_keys, args.labels))
+        else:
+            condition_labels = {key: str(key) for key in group_keys}
+
+    points = load_time_points(results_paths, args.metric, censor, well_to_group=well_to_group)
 
     print(f"[ActivityByTime] Found {len(points)} time point(s):")
     for p in points:
@@ -205,6 +348,12 @@ def main():
         print(f"  t={p['elapsed_min']:>6.1f} min   {p['vidname']:<28s}  "
               f"used={len(vals):>3}/{p['n_total']} (censored={p['n_censored']})  "
               f"mean={mean:.2f}  std={std:.2f}")
+        if args.by_condition:
+            for group_key, label in condition_labels.items():
+                gvals = p["values_by_group"].get(group_key, np.array([]))
+                gmean = np.mean(gvals) if len(gvals) else float("nan")
+                gstd = np.std(gvals) if len(gvals) else float("nan")
+                print(f"      {label:<10s} n={len(gvals):>3}  mean={gmean:.2f}  std={gstd:.2f}")
 
     all_times = np.concatenate([np.full(len(p["values"]), p["elapsed_min"]) for p in points])
     all_values = np.concatenate([p["values"] for p in points])
@@ -215,11 +364,14 @@ def main():
     print(f"  Spearman rho = {spearman_r:+.3f}  (p = {spearman_p:.4f})")
 
     save_path = args.output
+    suffix = "_by_condition" if args.by_condition else ""
     if save_path is None and args.save:
-        save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}.png")
+        save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}{suffix}.png")
 
-    title = f"{args.metric} vs. Recording Time  ({len(points)} video(s))"
-    plot_activity_by_time(points, args.metric, title, save_path=save_path)
+    if args.by_condition:
+        plot_activity_by_time_grouped(points, args.metric, condition_labels, save_path=save_path)
+    else:
+        plot_activity_by_time(points, args.metric, save_path=save_path)
 
 
 if __name__ == "__main__":
