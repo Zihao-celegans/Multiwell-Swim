@@ -9,6 +9,15 @@ Examples:
 
     Save the layout as CSV:
         python random_layout_generator.py --seed 123 --output layout.csv
+
+    Display a color-coded plate diagram:
+        python random_layout_generator.py --seed 123 --plot
+
+    Save the plate diagram to an image file:
+        python random_layout_generator.py --seed 123 --plot-output layout.png
+
+    Save a separate plate diagram per condition into a folder:
+        python random_layout_generator.py --seed 123 --plot-dir layout_plots
 """
 
 import argparse
@@ -22,8 +31,8 @@ from matplotlib.patches import Circle
 
 ROW_LABELS = tuple("ABCDEFGH")
 NUM_COLUMNS = 12
-DEFAULT_WORM_COUNTS = tuple(range(5, 16, 5))
-DEFAULT_WELLS_PER_CONDITION = 24
+DEFAULT_WORM_COUNTS = tuple(range(1, 9, 1))
+DEFAULT_WELLS_PER_CONDITION = 12
 
 
 def all_wells() -> list[str]:
@@ -183,6 +192,27 @@ def plot_layout(
         plt.close(fig)
 
 
+def plot_condition_layouts(layout: dict[int, list[str]], output_dir: str | Path) -> None:
+    """Save a separate plate diagram for each condition into a folder.
+
+    Each image highlights only the wells assigned to that condition, with
+    all other wells drawn in light gray.
+
+    Args:
+        layout: Mapping of worm count to assigned well labels, as returned
+            by generate_layout.
+        output_dir: Folder to save the per-condition images into. Created
+            if it does not already exist.
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    for worm_count, wells in layout.items():
+        single_condition_layout = {worm_count: wells}
+        image_path = output_path / f"condition_{worm_count}.png"
+        plot_layout(single_condition_layout, output_path=image_path, show=False)
+
+
 def _print_layout(layout: dict[int, list[str]]) -> None:
     """Print a compact human-readable layout."""
     print("worm_count  wells")
@@ -216,6 +246,14 @@ def main() -> None:
         type=Path,
         help="Optional image file (e.g. PNG) to save the plate diagram to.",
     )
+    parser.add_argument(
+        "--plot-dir",
+        type=Path,
+        help=(
+            "Optional folder to create and save a separate plate diagram "
+            "image into, one per condition."
+        ),
+    )
     args = parser.parse_args()
 
     layout = generate_layout(seed=args.seed)
@@ -226,6 +264,10 @@ def main() -> None:
 
     if args.plot or args.plot_output:
         plot_layout(layout, output_path=args.plot_output, show=args.plot)
+
+    if args.plot_dir:
+        plot_condition_layouts(layout, args.plot_dir)
+        print(f"Saved per-condition plate diagrams to {args.plot_dir}")
 
 
 if __name__ == "__main__":
