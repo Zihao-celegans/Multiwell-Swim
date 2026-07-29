@@ -43,7 +43,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 from random_layout_generator import ROW_LABELS, generate_layout
-from plot_activity_by_worm_count import load_layout_from_csv, well_to_worm_count_map
+from plot_activity_by_worm_count import load_layout_from_csv, well_to_condition_map
 
 TIMESTAMP_RE = re.compile(r"(\d{2})-(\d{2})-(\d{2})")
 FIGSIZE_4_3 = (8, 6)  # Fixed 4:3 aspect ratio for saved figures
@@ -189,7 +189,7 @@ def plot_activity_by_time(points: list, metric: str, save_path: str = None) -> N
 def plot_activity_by_time_grouped(
     points: list,
     metric: str,
-    condition_labels: dict,
+    conditions: list,
     save_path: str = None,
 ) -> None:
     """Box + strip plot of per-well activity vs. elapsed time, with one
@@ -198,12 +198,11 @@ def plot_activity_by_time_grouped(
     Args:
         points: Time points from load_time_points(..., well_to_group=...),
             each with a "values_by_group" dict.
-        condition_labels: Mapping of group key (e.g. worm-count int from the
-            layout) -> display label (e.g. drug concentration), in the
-            desired legend order.
+        conditions: Condition names, in the order they should appear in the
+            legend (e.g. the layout's key order — ascending dose, etc.).
     """
     n_groups = len(points)
-    n_conditions = len(condition_labels)
+    n_conditions = len(conditions)
     fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
     cmap = plt.get_cmap("tab10")
     rng = np.random.default_rng(0)
@@ -211,13 +210,13 @@ def plot_activity_by_time_grouped(
     box_width = 0.7 / n_conditions
     cluster_positions = np.arange(1, n_groups + 1)
 
-    for idx, (group_key, label) in enumerate(condition_labels.items()):
+    for idx, condition in enumerate(conditions):
         color = cmap(idx % cmap.N)
         offset = (idx - (n_conditions - 1) / 2) * box_width
         positions = cluster_positions + offset
 
         data = [
-            p.get("values_by_group", {}).get(group_key, np.array([]))
+            p.get("values_by_group", {}).get(condition, np.array([]))
             for p in points
         ]
 
@@ -239,7 +238,7 @@ def plot_activity_by_time_grouped(
 
         # Proxy artist so the legend shows a swatch per condition
         # (boxplot patches aren't directly usable as legend handles).
-        ax.plot([], [], color=color, marker="s", linestyle="", markersize=8, label=label)
+        ax.plot([], [], color=color, marker="s", linestyle="", markersize=8, label=condition)
 
     labels = [f"{p['elapsed_min']:.0f}" for p in points]
     ax.set_xticks(cluster_positions)
@@ -278,25 +277,24 @@ def main():
                              "(e.g. no/insufficient worms), "
                              "e.g. --censor G10 G11 G12 H1 H2 H3 H4 H5 H6 H7 H8 H9 H10 H11 H12")
     parser.add_argument("--by_condition", action="store_true",
-                        help="Group wells by condition (worm-count layout produced by "
-                             "random_layout_generator.py, e.g. used here as drug-dose groups) "
-                             "instead of pooling all wells together.")
+                        help="Group wells by condition (layout produced by "
+                             "random_layout_generator.py — worm counts, drug doses, or "
+                             "any other named groups) instead of pooling all wells together.")
     parser.add_argument("--layout", default=None,
                         help="Path to a layout CSV saved by random_layout_generator.py "
                              "(--output). If omitted, the layout is regenerated with --seed. "
+                             "Condition names/labels are read directly from the CSV. "
                              "Only used with --by_condition.")
     parser.add_argument("--seed", type=int, default=42,
                         help="Seed used with random_layout_generator.py, used to regenerate "
                              "the layout when --layout is not given. Only used with --by_condition.")
-    parser.add_argument("--worm_counts", type=int, nargs="+", default=None,
-                        help="Worm-count conditions used with random_layout_generator.py "
-                             "(e.g. 5 10 15). Defaults to the generator's default. "
+    parser.add_argument("--conditions", nargs="+", default=None,
+                        help="Condition names, in order (e.g. --conditions \"0 mM\" \"0.2 mM\" "
+                             "\"2 mM\" \"20 mM\"), used to regenerate a layout with "
+                             "random_layout_generator.py. Order is preserved in the legend. "
+                             "Defaults to the generator's default conditions. Ignored when "
+                             "--layout is given (names come from the CSV directly). "
                              "Only used with --by_condition.")
-    parser.add_argument("--labels", nargs="+", default=None,
-                        help="Display label for each condition, matching the sorted "
-                             "--worm_counts order (e.g. --labels \"0 mM\" \"0.2 mM\" \"2 mM\"). "
-                             "Defaults to the worm-count numbers themselves. Only used with "
-                             "--by_condition.")
     parser.add_argument("--save", action="store_true",
                         help="Save the figure as a PNG.")
     parser.add_argument("--output", default=None,
@@ -312,7 +310,7 @@ def main():
 
     censor = set(args.censor)
 
-    condition_labels = None
+    condition_order = None
     well_to_group = None
     if args.by_condition:
         if args.layout:
@@ -320,23 +318,14 @@ def main():
             layout = load_layout_from_csv(args.layout)
         else:
             kwargs = {"seed": args.seed}
-            if args.worm_counts:
-                kwargs["worm_counts"] = tuple(args.worm_counts)
+            if args.conditions:
+                kwargs["conditions"] = tuple(args.conditions)
             print(f"[ActivityByTime] Regenerating layout with seed={args.seed}, "
-                  f"worm_counts={kwargs.get('worm_counts', 'default')}")
+                  f"conditions={kwargs.get('conditions', 'default')}")
             layout = generate_layout(**kwargs)
 
-        well_to_group = well_to_worm_count_map(layout)
-        group_keys = sorted(layout.keys())
-        if args.labels:
-            if len(args.labels) != len(group_keys):
-                raise SystemExit(
-                    f"[ActivityByTime] --labels has {len(args.labels)} entries but the "
-                    f"layout has {len(group_keys)} conditions {group_keys}."
-                )
-            condition_labels = dict(zip(group_keys, args.labels))
-        else:
-            condition_labels = {key: str(key) for key in group_keys}
+        well_to_group = well_to_condition_map(layout)
+        condition_order = list(layout.keys())
 
     points = load_time_points(results_paths, args.metric, censor, well_to_group=well_to_group)
 
@@ -349,11 +338,11 @@ def main():
               f"used={len(vals):>3}/{p['n_total']} (censored={p['n_censored']})  "
               f"mean={mean:.2f}  std={std:.2f}")
         if args.by_condition:
-            for group_key, label in condition_labels.items():
-                gvals = p["values_by_group"].get(group_key, np.array([]))
+            for condition in condition_order:
+                gvals = p["values_by_group"].get(condition, np.array([]))
                 gmean = np.mean(gvals) if len(gvals) else float("nan")
                 gstd = np.std(gvals) if len(gvals) else float("nan")
-                print(f"      {label:<10s} n={len(gvals):>3}  mean={gmean:.2f}  std={gstd:.2f}")
+                print(f"      {condition:<10s} n={len(gvals):>3}  mean={gmean:.2f}  std={gstd:.2f}")
 
     all_times = np.concatenate([np.full(len(p["values"]), p["elapsed_min"]) for p in points])
     all_values = np.concatenate([p["values"] for p in points])
@@ -369,7 +358,7 @@ def main():
         save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}{suffix}.png")
 
     if args.by_condition:
-        plot_activity_by_time_grouped(points, args.metric, condition_labels, save_path=save_path)
+        plot_activity_by_time_grouped(points, args.metric, condition_order, save_path=save_path)
     else:
         plot_activity_by_time(points, args.metric, save_path=save_path)
 

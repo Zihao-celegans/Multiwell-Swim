@@ -1,11 +1,20 @@
 """Generate a reproducible random layout for a 96-well plate.
 
-The default layout assigns eight distinct wells to each worm-count condition
-of 5, 10, ..., 40 worms. Wells are labelled A1 through H12.
+Assigns distinct wells to each of a list of named conditions — e.g. worm
+counts ("5", "10", ...), drug concentrations ("0 mM", "0.2 mM", ...), or
+any other group names. Wells are labelled A1 through H12. The condition
+name itself is used as the group key everywhere (layout dict key, CSV
+column, plot legend) — order is preserved from the --conditions list you
+pass in, not re-sorted, so pass them in the order you want them plotted
+(e.g. ascending dose).
 
 Examples:
-    Print a layout using seed 123:
+    Print the default layout (conditions "1".. "8") using seed 123:
         python random_layout_generator.py --seed 123
+
+    Generate a 4-condition drug dose-response layout:
+        python random_layout_generator.py --seed 123 \\
+            --conditions "0 mM" "0.2 mM" "2 mM" "20 mM"
 
     Save the layout as CSV:
         python random_layout_generator.py --seed 123 --output layout.csv
@@ -23,6 +32,7 @@ Examples:
 import argparse
 import csv
 import random
+import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,7 +41,7 @@ from matplotlib.patches import Circle
 
 ROW_LABELS = tuple("ABCDEFGH")
 NUM_COLUMNS = 12
-DEFAULT_WORM_COUNTS = tuple(range(1, 9, 1))
+DEFAULT_CONDITIONS = tuple(str(n) for n in range(1, 9))
 DEFAULT_WELLS_PER_CONDITION = 12
 
 
@@ -51,32 +61,36 @@ def _well_sort_key(well: str) -> tuple[int, int]:
 
 def generate_layout(
     seed: int | None = None,
-    worm_counts: tuple[int, ...] = DEFAULT_WORM_COUNTS,
+    conditions: tuple[str, ...] = DEFAULT_CONDITIONS,
     wells_per_condition: int = DEFAULT_WELLS_PER_CONDITION,
-) -> dict[int, list[str]]:
-    """Randomly assign distinct wells to each worm-count condition.
+) -> dict[str, list[str]]:
+    """Randomly assign distinct wells to each named condition.
 
     Args:
         seed: Optional seed used to reproduce the same layout.
-        worm_counts: Worm counts to include as experimental conditions.
+        conditions: Condition names/labels to include as experimental groups
+            (e.g. worm counts as strings, drug concentrations, or any other
+            group names). Order is preserved in the returned dict and used
+            by downstream plotting/grouping code (e.g. legend order) — pass
+            them in the order you want displayed (e.g. ascending dose).
         wells_per_condition: Number of wells assigned to each condition.
 
     Returns:
-        A dictionary mapping each worm count to its assigned well labels.
+        A dictionary mapping each condition name to its assigned well
+        labels, in the same order as `conditions`.
 
     Raises:
-        ValueError: If the requested layout cannot fit on a 96-well plate.
+        ValueError: If the requested layout cannot fit on a 96-well plate,
+            or condition names are empty/duplicated.
     """
-    if not worm_counts:
-        raise ValueError("At least one worm-count condition is required.")
+    if not conditions:
+        raise ValueError("At least one condition is required.")
     if wells_per_condition < 1:
         raise ValueError("wells_per_condition must be at least 1.")
-    if any(worm_count < 1 for worm_count in worm_counts):
-        raise ValueError("Worm counts must be positive integers.")
-    if len(set(worm_counts)) != len(worm_counts):
-        raise ValueError("worm_counts must not contain duplicates.")
+    if len(set(conditions)) != len(conditions):
+        raise ValueError("conditions must not contain duplicate names.")
 
-    total_wells = len(worm_counts) * wells_per_condition
+    total_wells = len(conditions) * wells_per_condition
     plate_wells = all_wells()
     if total_wells > len(plate_wells):
         raise ValueError(
@@ -88,53 +102,53 @@ def generate_layout(
     selected_wells = generator.sample(plate_wells, total_wells)
 
     return {
-        worm_count: sorted(
+        condition: sorted(
             selected_wells[index:index + wells_per_condition],
             key=_well_sort_key,
         )
-        for index, worm_count in zip(
-            range(0, total_wells, wells_per_condition), worm_counts
+        for index, condition in zip(
+            range(0, total_wells, wells_per_condition), conditions
         )
     }
 
 
-def write_layout_csv(layout: dict[int, list[str]], output_path: str | Path) -> None:
+def write_layout_csv(layout: dict[str, list[str]], output_path: str | Path) -> None:
     """Write a generated layout to CSV, one well assignment per row."""
     with Path(output_path).open("w", newline="", encoding="utf-8") as output_file:
         writer = csv.writer(output_file)
-        writer.writerow(("worm_count", "well"))
-        for worm_count, wells in layout.items():
+        writer.writerow(("condition", "well"))
+        for condition, wells in layout.items():
             for well in wells:
-                writer.writerow((worm_count, well))
+                writer.writerow((condition, well))
 
 
 def plot_layout(
-    layout: dict[int, list[str]],
+    layout: dict[str, list[str]],
     output_path: str | Path | None = None,
     show: bool = True,
 ) -> None:
     """Draw a color-coded 8x12 plate diagram of the well layout.
 
-    Each worm-count condition is assigned a distinct color, and unassigned
-    wells are drawn in light gray.
+    Each condition is assigned a distinct color, and unassigned wells are
+    drawn in light gray.
 
     Args:
-        layout: Mapping of worm count to assigned well labels, as returned
-            by generate_layout.
+        layout: Mapping of condition name to assigned well labels, as
+            returned by generate_layout.
         output_path: Optional path to save the figure as an image file.
         show: Whether to display the figure interactively.
     """
-    well_to_condition: dict[str, int] = {
-        well: worm_count
-        for worm_count, wells in layout.items()
+    well_to_condition: dict[str, str] = {
+        well: condition
+        for condition, wells in layout.items()
         for well in wells
     }
 
     conditions = list(layout.keys())
     cmap = plt.get_cmap("tab10" if len(conditions) <= 10 else "tab20")
     condition_colors = {
-        worm_count: cmap(index % cmap.N)
-        for index, worm_count in enumerate(conditions)
+        condition: cmap(index % cmap.N)
+        for index, condition in enumerate(conditions)
     }
     unassigned_color = "0.9"
 
@@ -166,12 +180,12 @@ def plot_layout(
             [0], [0],
             marker="o",
             color="w",
-            markerfacecolor=condition_colors[worm_count],
+            markerfacecolor=condition_colors[condition],
             markeredgecolor="black",
             markersize=10,
-            label=f"{worm_count} worms",
+            label=condition,
         )
-        for worm_count in conditions
+        for condition in conditions
     ]
     ax.legend(
         handles=legend_handles,
@@ -192,38 +206,59 @@ def plot_layout(
         plt.close(fig)
 
 
-def plot_condition_layouts(layout: dict[int, list[str]], output_dir: str | Path) -> None:
+def _slugify(text: str) -> str:
+    """Turn a condition name into a filesystem-safe slug for filenames."""
+    slug = re.sub(r"[^\w.-]+", "_", text.strip())
+    return slug.strip("_") or "condition"
+
+
+def plot_condition_layouts(layout: dict[str, list[str]], output_dir: str | Path) -> None:
     """Save a separate plate diagram for each condition into a folder.
 
     Each image highlights only the wells assigned to that condition, with
     all other wells drawn in light gray.
 
     Args:
-        layout: Mapping of worm count to assigned well labels, as returned
-            by generate_layout.
+        layout: Mapping of condition name to assigned well labels, as
+            returned by generate_layout.
         output_dir: Folder to save the per-condition images into. Created
             if it does not already exist.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    for worm_count, wells in layout.items():
-        single_condition_layout = {worm_count: wells}
-        image_path = output_path / f"condition_{worm_count}.png"
+    for condition, wells in layout.items():
+        single_condition_layout = {condition: wells}
+        image_path = output_path / f"condition_{_slugify(condition)}.png"
         plot_layout(single_condition_layout, output_path=image_path, show=False)
 
 
-def _print_layout(layout: dict[int, list[str]]) -> None:
+def _print_layout(layout: dict[str, list[str]]) -> None:
     """Print a compact human-readable layout."""
-    print("worm_count  wells")
+    print("condition    wells")
     print("-----------  " + "-" * 31)
-    for worm_count, wells in layout.items():
-        print(f"{worm_count:>10}  {', '.join(wells)}")
+    for condition, wells in layout.items():
+        print(f"{condition:>10}  {', '.join(wells)}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate a reproducible random layout for an 8 x 12 plate."
+    )
+    parser.add_argument(
+        "--conditions",
+        nargs="+",
+        default=list(DEFAULT_CONDITIONS),
+        help="Condition names/labels, in order (e.g. --conditions \"0 mM\" \"0.2 mM\" "
+             "\"2 mM\" \"20 mM\"). Can be worm counts, drug concentrations, or any "
+             "other group names — order is preserved for plotting/legends. "
+             "Default: \"1\" .. \"8\".",
+    )
+    parser.add_argument(
+        "--wells-per-condition",
+        type=int,
+        default=DEFAULT_WELLS_PER_CONDITION,
+        help="Number of wells assigned to each condition (default: 12).",
     )
     parser.add_argument(
         "--seed",
@@ -256,7 +291,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    layout = generate_layout(seed=args.seed)
+    layout = generate_layout(
+        seed=args.seed,
+        conditions=tuple(args.conditions),
+        wells_per_condition=args.wells_per_condition,
+    )
     _print_layout(layout)
     if args.output:
         write_layout_csv(layout, args.output)

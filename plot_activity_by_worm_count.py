@@ -43,25 +43,28 @@ from random_layout_generator import ROW_LABELS, NUM_COLUMNS, generate_layout
 # Layout loading
 # ---------------------------------------------------------------------------
 
-def load_layout_from_csv(csv_path: str) -> dict[int, list[str]]:
-    """Load a well→worm-count layout previously saved by
+def load_layout_from_csv(csv_path: str) -> dict[str, list[str]]:
+    """Load a well->condition layout previously saved by
     random_layout_generator.py's write_layout_csv().
+
+    Supports both the current 'condition,well' schema and the legacy
+    'worm_count,well' schema (old CSVs) for backward compatibility.
     """
-    layout: dict[int, list[str]] = {}
+    layout: dict[str, list[str]] = {}
     with open(csv_path, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
+        condition_col = "condition" if "condition" in (reader.fieldnames or []) else "worm_count"
         for row in reader:
-            worm_count = int(row["worm_count"])
-            layout.setdefault(worm_count, []).append(row["well"])
+            layout.setdefault(row[condition_col], []).append(row["well"])
     return layout
 
 
-def well_to_worm_count_map(layout: dict[int, list[str]]) -> dict[str, int]:
-    """Invert a worm_count → [wells] layout into well → worm_count."""
-    mapping: dict[str, int] = {}
-    for worm_count, wells in layout.items():
+def well_to_condition_map(layout: dict[str, list[str]]) -> dict[str, str]:
+    """Invert a condition -> [wells] layout into well -> condition."""
+    mapping: dict[str, str] = {}
+    for condition, wells in layout.items():
         for well in wells:
-            mapping[well] = worm_count
+            mapping[well] = condition
     return mapping
 
 
@@ -80,16 +83,16 @@ def well_labels_for_matrix(num_row: int, num_col: int) -> list[str]:
     ]
 
 
-def collect_values_by_worm_count(
+def collect_values_by_condition(
     results_paths: list[str],
     metric: str,
-    well_to_n: dict[str, int],
-) -> dict[int, list[float]]:
-    """Gather per-well activity values across all results files, grouped by N."""
-    values_by_n: dict[int, list[float]] = {}
+    well_to_condition: dict[str, str],
+) -> dict[str, list[float]]:
+    """Gather per-well activity values across all results files, grouped by condition."""
+    values_by_condition: dict[str, list[float]] = {}
 
     for path in results_paths:
-        print(f"[PlotByN] Loading results: {path}")
+        print(f"[PlotByCondition] Loading results: {path}")
         with open(path) as fh:
             res = json.load(fh)
 
@@ -101,14 +104,14 @@ def collect_values_by_worm_count(
         flat = [v for row in matrix for v in row]
 
         for well, val in zip(labels, flat):
-            if well not in well_to_n:
-                continue   # well not assigned to any worm-count condition
+            if well not in well_to_condition:
+                continue   # well not assigned to any condition
             if val is None or (isinstance(val, float) and math.isnan(val)):
                 continue
-            worm_count = well_to_n[well]
-            values_by_n.setdefault(worm_count, []).append(float(val))
+            condition = well_to_condition[well]
+            values_by_condition.setdefault(condition, []).append(float(val))
 
-    return values_by_n
+    return values_by_condition
 
 
 # ---------------------------------------------------------------------------
@@ -116,19 +119,19 @@ def collect_values_by_worm_count(
 # ---------------------------------------------------------------------------
 
 def _box_strip_plot(
-    values_by_n: dict[int, list[float]],
+    values_by_condition: dict[str, list[float]],
+    order: list[str],
     ylabel: str,
     title: str,
     save_path: str = None,
 ) -> None:
-    """Shared strip + box plot renderer, one group per worm count N."""
-    worm_counts = sorted(values_by_n.keys())
-    data = [values_by_n[n] for n in worm_counts]
+    """Shared strip + box plot renderer, one group per condition (in `order`)."""
+    data = [values_by_condition[c] for c in order]
 
-    fig, ax = plt.subplots(figsize=(max(6, len(worm_counts) * 1.1), 6))
+    fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.1), 6))
     rng = np.random.default_rng(0)   # reproducible jitter
 
-    positions = np.arange(1, len(worm_counts) + 1)
+    positions = np.arange(1, len(order) + 1)
 
     ax.boxplot(
         data, positions=positions, widths=0.4, patch_artist=True,
@@ -149,8 +152,8 @@ def _box_strip_plot(
                     f"n={len(values)}", va="center", fontsize=8, color="dimgray")
 
     ax.set_xticks(positions)
-    ax.set_xticklabels([str(n) for n in worm_counts])
-    ax.set_xlabel("Worms per well (N)", fontsize=11)
+    ax.set_xticklabels(order)
+    ax.set_xlabel("Condition", fontsize=11)
     ax.set_ylabel(ylabel, fontsize=11)
     ax.set_title(title, fontsize=13)
 
@@ -163,14 +166,16 @@ def _box_strip_plot(
 
 
 def plot_activity_by_worm_count(
-    values_by_n: dict[int, list[float]],
+    values_by_condition: dict[str, list[float]],
+    order: list[str],
     metric: str,
     title: str,
     save_path: str = None,
 ) -> None:
-    """Raw per-well activity, grouped by worm count N."""
+    """Raw per-well activity, grouped by condition."""
     _box_strip_plot(
-        values_by_n,
+        values_by_condition,
+        order,
         ylabel=f"{metric} — Active pixels (A.U.)",
         title=title,
         save_path=save_path,
@@ -178,21 +183,31 @@ def plot_activity_by_worm_count(
 
 
 def plot_activity_per_worm(
-    values_by_n: dict[int, list[float]],
+    values_by_condition: dict[str, list[float]],
+    order: list[str],
     metric: str,
     title: str,
     save_path: str = None,
 ) -> None:
-    """Per-worm activity (well activity / N), grouped by worm count N.
+    """Per-worm activity (well activity / N), grouped by condition.
 
     Highlights whether activity scales linearly with worm count or
     saturates/declines at higher densities (e.g. crowding effects).
+    Requires each condition name to be numeric (a worm count).
     """
-    per_worm_by_n = {
-        n: [v / n for v in values] for n, values in values_by_n.items()
-    }
+    try:
+        per_worm_by_condition = {
+            c: [v / float(c) for v in values] for c, values in values_by_condition.items()
+        }
+    except ValueError as exc:
+        raise SystemExit(
+            "[PlotByN] Per-worm normalisation requires numeric condition names "
+            "(worm counts), e.g. \"5\", \"10\". Use activity_by_time.py --by_condition "
+            "for non-numeric conditions (e.g. drug doses)."
+        ) from exc
     _box_strip_plot(
-        per_worm_by_n,
+        per_worm_by_condition,
+        order,
         ylabel=f"{metric} / N — Active pixels per worm (A.U.)",
         title=title,
         save_path=save_path,
@@ -217,12 +232,11 @@ def main():
     parser.add_argument("--seed", type=int, default=42,
                         help="Seed used with random_layout_generator.py, "
                              "used to regenerate the layout when --layout is not given.")
-    parser.add_argument("--worm_counts", type=int, nargs="+", default=None,
-                        help="Worm-count conditions actually used with "
-                             "random_layout_generator.py (e.g. 5 10 15 20 25 30). "
-                             "Must match exactly, including omitted conditions, "
-                             "or the regenerated layout will not line up. "
-                             "Defaults to 5,10,...,40 (all 8 conditions).")
+    parser.add_argument("--conditions", nargs="+", default=None,
+                        help="Condition names actually used with random_layout_generator.py "
+                             "(e.g. 5 10 15 20 25 30), as numeric worm counts. Must match "
+                             "exactly, including omitted conditions, or the regenerated "
+                             "layout will not line up. Defaults to \"1\"..\"8\".")
     parser.add_argument("--metric", choices=["ActVal", "ActValS"], default="ActValS",
                         help="Which activity metric to plot.")
     parser.add_argument("--save", action="store_true",
@@ -236,27 +250,30 @@ def main():
         layout = load_layout_from_csv(args.layout)
     else:
         kwargs = {"seed": args.seed}
-        if args.worm_counts:
-            kwargs["worm_counts"] = tuple(args.worm_counts)
+        if args.conditions:
+            kwargs["conditions"] = tuple(args.conditions)
         print(f"[PlotByN] Regenerating layout with seed={args.seed}, "
-              f"worm_counts={kwargs.get('worm_counts', 'default (5..40)')}")
+              f"conditions={kwargs.get('conditions', 'default (1..8)')}")
         layout = generate_layout(**kwargs)
 
-    well_to_n = well_to_worm_count_map(layout)
+    well_to_condition = well_to_condition_map(layout)
 
-    values_by_n = collect_values_by_worm_count(args.results, args.metric, well_to_n)
+    values_by_condition = collect_values_by_condition(args.results, args.metric, well_to_condition)
 
-    if not values_by_n:
+    if not values_by_condition:
         raise SystemExit(
             "[PlotByN] No matching wells found — check that --layout/--seed "
             "matches the plate used for these results."
         )
 
+    order = [c for c in layout.keys() if c in values_by_condition]
+
     print("\n[PlotByN] Summary:")
-    for n in sorted(values_by_n):
-        vals = values_by_n[n]
+    for c in order:
+        vals = values_by_condition[c]
+        n = float(c)
         per_worm_vals = [v / n for v in vals]
-        print(f"  N={n:>3}  count={len(vals):>3}  "
+        print(f"  N={c:>3}  count={len(vals):>3}  "
               f"mean={np.mean(vals):.2f}  std={np.std(vals):.2f}  "
               f"|  per-worm mean={np.mean(per_worm_vals):.2f}  "
               f"std={np.std(per_worm_vals):.2f}")
@@ -269,14 +286,14 @@ def main():
     save_path = args.output
     if save_path is None and args.save:
         save_path = os.path.join(stem_dir, f"{stem}_{args.metric}_by_N.png")
-    plot_activity_by_worm_count(values_by_n, args.metric, title, save_path=save_path)
+    plot_activity_by_worm_count(values_by_condition, order, args.metric, title, save_path=save_path)
 
     # ── Figure: per-worm activity (activity / N) vs. worm count ─────────────
     per_worm_title = f"{args.metric} per Worm vs. Worm Count  ({len(args.results)} video(s))"
     per_worm_save_path = None
     if args.save:
         per_worm_save_path = os.path.join(stem_dir, f"{stem}_{args.metric}_per_worm_by_N.png")
-    plot_activity_per_worm(values_by_n, args.metric, per_worm_title, save_path=per_worm_save_path)
+    plot_activity_per_worm(values_by_condition, order, args.metric, per_worm_title, save_path=per_worm_save_path)
 
 
 if __name__ == "__main__":
