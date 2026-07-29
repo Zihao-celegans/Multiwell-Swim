@@ -15,8 +15,9 @@ For each video's results.json:
 
 Plots a box + strip plot (one group per video/time point, x-axis = elapsed
 minutes) showing the distribution of per-well activity at each time point,
-and prints summary stats plus the overall correlation between elapsed time
-and activity.
+plus a mean ± SD line plot (x-axis to scale in elapsed minutes) showing the
+overall temporal trend, and prints summary stats plus the overall
+correlation between elapsed time and activity.
 
 Usage:
     # Auto-discover all "<video>_output" subfolders under a parent directory
@@ -256,6 +257,79 @@ def plot_activity_by_time_grouped(
 
 
 # ---------------------------------------------------------------------------
+# Mean ± SD line plots
+# ---------------------------------------------------------------------------
+
+def plot_activity_by_time_line(points: list, metric: str, save_path: str = None) -> None:
+    """Mean ± SD line plot of per-well activity vs. elapsed time (pooled
+    across all wells). X-axis is to scale in elapsed minutes, unlike the
+    box plot's evenly-spaced categorical positions, so it accurately shows
+    time gaps between videos.
+    """
+    elapsed = np.array([p["elapsed_min"] for p in points])
+    means = np.array([np.mean(p["values"]) if len(p["values"]) else np.nan for p in points])
+    stds = np.array([np.std(p["values"]) if len(p["values"]) else np.nan for p in points])
+
+    fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
+
+    ax.errorbar(elapsed, means, yerr=stds, color="steelblue", marker="o", linewidth=2,
+                capsize=4, elinewidth=1.5, zorder=3)
+
+    ax.set_xlabel("Elapsed time since first video (min)", fontsize=11)
+    ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    ax.set_title("Mean ± SD over time", fontsize=12)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150)
+        print(f"[ActivityByTime] Saved: {save_path}")
+    plt.show()
+
+
+def plot_activity_by_time_line_grouped(
+    points: list,
+    metric: str,
+    conditions: list,
+    save_path: str = None,
+) -> None:
+    """Mean ± SD line plot of per-well activity vs. elapsed time, with one
+    line (+ shaded SD band) per condition. X-axis is to scale in elapsed
+    minutes.
+
+    Args:
+        points: Time points from load_time_points(..., well_to_group=...),
+            each with a "values_by_group" dict.
+        conditions: Condition names, in the order they should appear in the
+            legend (e.g. the layout's key order — ascending dose, etc.).
+    """
+    elapsed = np.array([p["elapsed_min"] for p in points])
+    fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
+    cmap = plt.get_cmap("tab10")
+
+    for idx, condition in enumerate(conditions):
+        color = cmap(idx % cmap.N)
+        group_vals = [p.get("values_by_group", {}).get(condition, np.array([])) for p in points]
+        means = np.array([np.mean(v) if len(v) else np.nan for v in group_vals])
+        stds = np.array([np.std(v) if len(v) else np.nan for v in group_vals])
+
+        ax.errorbar(elapsed, means, yerr=stds, color=color, marker="o", linewidth=2,
+                    label=condition, capsize=4, elinewidth=1.5, zorder=3)
+
+    ax.set_xlabel("Elapsed time (min)", fontsize=11)
+    ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    ax.set_title("Mean ± SD over time, by condition", fontsize=12)
+    ax.legend(title="Condition", loc="best")
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300)
+        print(f"[ActivityByTime] Saved: {save_path}")
+    plt.show()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -354,13 +428,20 @@ def main():
 
     save_path = args.output
     suffix = "_by_condition" if args.by_condition else ""
+    line_save_path = None
+    if save_path is not None:
+        root, ext = os.path.splitext(save_path)
+        line_save_path = f"{root}_line{ext}"
     if save_path is None and args.save:
         save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}{suffix}.png")
+        line_save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}{suffix}_line.png")
 
     if args.by_condition:
         plot_activity_by_time_grouped(points, args.metric, condition_order, save_path=save_path)
+        plot_activity_by_time_line_grouped(points, args.metric, condition_order, save_path=line_save_path)
     else:
         plot_activity_by_time(points, args.metric, save_path=save_path)
+        plot_activity_by_time_line(points, args.metric, save_path=line_save_path)
 
 
 if __name__ == "__main__":
