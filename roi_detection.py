@@ -210,7 +210,7 @@ def run_new_roi(frame: np.ndarray, num_row: int, num_col: int,
             continue   # outer loop: redo clicks
 
         # Default radius carried across inner iterations
-        radius = 190.0
+        radius = 200.0
 
         while True:   # inner: redo radius without re-clicking corners
             # ── Step B: get radius ───────────────────────────────────────────

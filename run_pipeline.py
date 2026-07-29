@@ -122,6 +122,11 @@ def main():
     parser.add_argument("--save", action="store_true",
                         help="Pass --save through to visualize_activity.py "
                              "(saves PNGs alongside the results file).")
+    parser.add_argument("--no_show", action="store_true",
+                        help="Pass --no_show through to visualize_activity.py "
+                             "(closes each figure right after saving instead of "
+                             "blocking on a manual window close — use with --save "
+                             "for unattended/parallel runs).")
 
     args = parser.parse_args()
 
@@ -167,6 +172,8 @@ def main():
         viz_args = ["--results", results_path, "--video", video_path, "--roi", roi_path]
         if args.save:
             viz_args.append("--save")
+        if args.no_show:
+            viz_args.append("--no_show")
         _run_step(args.python, VISUALIZE_ACTIVITY_SCRIPT, viz_args, "Step 3: Visualization")
     else:
         print("\n[Pipeline] Skipping visualization (--skip_visualize).")

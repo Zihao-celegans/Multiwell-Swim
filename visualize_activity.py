@@ -66,7 +66,8 @@ def _read_first_frame(video_path: str) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def plot_plate_heatmap(act_val: np.ndarray, act_val_s: np.ndarray,
-                       title_prefix: str, save_path: str = None) -> None:
+                       title_prefix: str, save_path: str = None,
+                       show: bool = True) -> None:
     """Colour-coded 8×12 plate grid for ActVal and ActValS side-by-side."""
     num_row, num_col = act_val.shape
 
@@ -108,7 +109,10 @@ def plot_plate_heatmap(act_val: np.ndarray, act_val_s: np.ndarray,
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[Viz] Saved: {save_path}")
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +121,8 @@ def plot_plate_heatmap(act_val: np.ndarray, act_val_s: np.ndarray,
 
 def plot_spatial_overlay(frame: np.ndarray, roi_list: list,
                          act_val_flat: np.ndarray,
-                         title_prefix: str, save_path: str = None) -> None:
+                         title_prefix: str, save_path: str = None,
+                         show: bool = True) -> None:
     """Draw ROI circles on the video frame, colour-coded by ActVal."""
     fig, ax = plt.subplots(figsize=(13, 8))
     ax.imshow(frame, cmap="gray", aspect="equal", interpolation="nearest")
@@ -149,7 +154,10 @@ def plot_spatial_overlay(frame: np.ndarray, roi_list: list,
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[Viz] Saved: {save_path}")
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +165,8 @@ def plot_spatial_overlay(frame: np.ndarray, roi_list: list,
 # ---------------------------------------------------------------------------
 
 def plot_distribution(act_val_flat: np.ndarray, act_val_s_flat: np.ndarray,
-                      title_prefix: str, save_path: str = None) -> None:
+                      title_prefix: str, save_path: str = None,
+                      show: bool = True) -> None:
     """Strip + box plot of per-well activity values."""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharey=False)
 
@@ -198,7 +207,10 @@ def plot_distribution(act_val_flat: np.ndarray, act_val_s_flat: np.ndarray,
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[Viz] Saved: {save_path}")
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +219,8 @@ def plot_distribution(act_val_flat: np.ndarray, act_val_s_flat: np.ndarray,
 
 def plot_timecourse_heatmap(act_val_s_tc: np.ndarray, fps: float,
                             num_row: int, num_col: int,
-                            title_prefix: str, save_path: str = None) -> None:
+                            title_prefix: str, save_path: str = None,
+                            show: bool = True) -> None:
     """Kymograph: x = time (s), y = well index, colour = ActValS.
 
     Wells are ordered row-major (A1, A2, …, A12, B1, …, H12) on the y-axis,
@@ -263,7 +276,10 @@ def plot_timecourse_heatmap(act_val_s_tc: np.ndarray, fps: float,
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"[Viz] Saved: {save_path}")
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +299,13 @@ def main():
                         help="Path to roi_info.json (needed for Figure 2).")
     parser.add_argument("--save", action="store_true",
                         help="Save each figure as a PNG alongside the results file.")
+    parser.add_argument("--no_show", action="store_true",
+                        help="Don't display figures interactively (close each one "
+                             "right after it's created/saved instead of blocking "
+                             "on a manual window close). Combine with --save to "
+                             "write PNGs unattended.")
     args = parser.parse_args()
+    show = not args.no_show
 
     # ── Load results ──────────────────────────────────────────────────────────
     print(f"[Viz] Loading results from: {args.results}")
@@ -301,7 +323,7 @@ def main():
 
     # ── Figure 1: Plate heatmap ───────────────────────────────────────────────
     save1 = stem + "_heatmap.png" if args.save else None
-    plot_plate_heatmap(act_val, act_val_s, title_prefix, save_path=save1)
+    plot_plate_heatmap(act_val, act_val_s, title_prefix, save_path=save1, show=show)
 
     # ── Figure 2: Spatial overlay (requires --video and --roi) ───────────────
     if args.video and args.roi:
@@ -310,14 +332,14 @@ def main():
         roi_list = roi_data["roi"]
         act_flat = act_val.flatten()          # row-major → same order as roi_list
         save2 = stem + "_overlay.png" if args.save else None
-        plot_spatial_overlay(frame, roi_list, act_flat, title_prefix, save_path=save2)
+        plot_spatial_overlay(frame, roi_list, act_flat, title_prefix, save_path=save2, show=show)
     else:
         print("[Viz] Skipping Figure 2 (spatial overlay) — provide --video and --roi.")
 
     # ── Figure 3: Distribution ────────────────────────────────────────────────
     save3 = stem + "_distribution.png" if args.save else None
     plot_distribution(act_val.flatten(), act_val_s.flatten(),
-                      title_prefix, save_path=save3)
+                      title_prefix, save_path=save3, show=show)
 
     # ── Figure 4: Timecourse heatmap ─────────────────────────────────────────
     if "ActValS_timecourse" in res and res["ActValS_timecourse"] is not None:
@@ -331,7 +353,7 @@ def main():
         num_col = len(act_val[0])
         save4 = stem + "_timecourse.png" if args.save else None
         plot_timecourse_heatmap(tc, fps, num_row, num_col,
-                                title_prefix, save_path=save4)
+                                title_prefix, save_path=save4, show=show)
     else:
         print("[Viz] Skipping Figure 4 (timecourse) — "
               "re-run activity_analysis.py to generate ActValS_timecourse.")
