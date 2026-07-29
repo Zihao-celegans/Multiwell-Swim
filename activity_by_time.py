@@ -277,7 +277,6 @@ def plot_activity_by_time_line(points: list, metric: str, save_path: str = None)
 
     ax.set_xlabel("Elapsed time since first video (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
-    ax.set_title("Mean ± SD over time", fontsize=12)
 
     plt.tight_layout()
 
@@ -318,7 +317,6 @@ def plot_activity_by_time_line_grouped(
 
     ax.set_xlabel("Elapsed time (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
-    ax.set_title("Mean ± SD over time, by condition", fontsize=12)
     ax.legend(title="Condition", loc="best")
 
     plt.tight_layout()
