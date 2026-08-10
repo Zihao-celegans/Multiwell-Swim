@@ -20,6 +20,11 @@ Steps:
   3. visualize_activity.py — always run, unless --skip_visualize is given.
 
 Usage:
+
+    # python .\run_pipeline.py \\
+    # --video "D:\MultiWell_swim\Preliminary\08042026_N2_Pyrantel_DRC_test01\video0016 14-57-26.avi" \\
+    # --no_show
+
     python run_pipeline.py --video "D:/.../video0004 09-54-18.avi"
     # → creates D:/.../video0004 09-54-18_output/ containing roi_info.json,
     #   results.json, and (with --save) all figures.
