@@ -21,8 +21,8 @@ correlation between elapsed time and activity.
 
 Usage:
 
-    # python activity_by_time.py --input_dir "D:\MultiWell_swim\Preliminary\08072026_N2_Pyrantel_DRC_test02" \\
-    # --by_condition --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignment_0804\Pyrantel_dose_layout.csv" \\
+    # python activity_by_time.py --input_dir "D:\\MultiWell_swim\\Preliminary\\08072026_N2_Pyrantel_DRC_test02" \\
+    # --by_condition --layout "C:\\Users\\jl200\\Dropbox\\JHU_2026_spring\\Multiwell_swim\\Well_assignment_0804\\Pyrantel_dose_layout.csv" \\
     # --save --censor C5
     
     # Auto-discover all "<video>_output" subfolders under a parent directory
