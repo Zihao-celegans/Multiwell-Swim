@@ -100,12 +100,21 @@ def load_time_points(
     group's per-well activity values.
     """
     points = []
+    prev_seconds = None
+    day_offset = 0
     for path in results_paths:
         with open(path) as fh:
             res = json.load(fh)
 
         vidname = res["Vidname"]
         seconds = parse_recording_seconds(vidname)
+        # Vidname only has HH-MM-SS (no date); detect midnight rollover by a
+        # drop in seconds-of-day relative to the previous video (assumes
+        # results_paths is already in chronological/recording order).
+        if prev_seconds is not None and seconds < prev_seconds:
+            day_offset += 24 * 3600
+        prev_seconds = seconds
+        seconds += day_offset
 
         matrix = np.array(res[metric], dtype=np.float64)
         num_row, num_col = matrix.shape
