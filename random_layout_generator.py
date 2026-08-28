@@ -8,6 +8,12 @@ column, plot legend) — order is preserved from the --conditions list you
 pass in, not re-sorted, so pass them in the order you want them plotted
 (e.g. ascending dose).
 
+By default, wells are split as evenly as possible across conditions to
+fill the plate (e.g. 8 conditions -> 12 wells each, 12 conditions -> 8
+wells each). Use --wells-per-condition to override this: pass a single
+number to apply the same count to every condition, or one number per
+condition (same order as --conditions) for unequal group sizes.
+
 Examples:
     Print the default layout (conditions "1".. "8") using seed 123:
         python random_layout_generator.py --seed 123
@@ -15,6 +21,18 @@ Examples:
     Generate a 4-condition drug dose-response layout:
         python random_layout_generator.py --seed 123 \\
             --conditions "0 mM" "0.2 mM" "2 mM" "20 mM"
+
+    Use a specific, uniform well count per condition (e.g. 12 conditions x
+    8 wells each = 96 wells):
+        python random_layout_generator.py --seed 123 \\
+            --conditions "1" "2" "3" "4" "5" "6" "7" "8" "9" "10" "11" "12" \\
+            --wells-per-condition 8
+
+    Use custom, unequal well counts per condition (one number per condition,
+    in the same order as --conditions):
+        python random_layout_generator.py --seed 123 \\
+            --conditions "0 mM" "0.2 mM" "2 mM" \\
+            --wells-per-condition 20 20 16
 
     Save the layout as CSV:
         python random_layout_generator.py --seed 123 --output layout.csv
@@ -42,7 +60,6 @@ from matplotlib.patches import Circle
 ROW_LABELS = tuple("ABCDEFGH")
 NUM_COLUMNS = 12
 DEFAULT_CONDITIONS = tuple(str(n) for n in range(1, 9))
-DEFAULT_WELLS_PER_CONDITION = 12
 
 
 def all_wells() -> list[str]:
@@ -62,7 +79,7 @@ def _well_sort_key(well: str) -> tuple[int, int]:
 def generate_layout(
     seed: int | None = None,
     conditions: tuple[str, ...] = DEFAULT_CONDITIONS,
-    wells_per_condition: int = DEFAULT_WELLS_PER_CONDITION,
+    wells_per_condition: int | list[int] | None = None,
 ) -> dict[str, list[str]]:
     """Randomly assign distinct wells to each named condition.
 
@@ -73,7 +90,12 @@ def generate_layout(
             group names). Order is preserved in the returned dict and used
             by downstream plotting/grouping code (e.g. legend order) — pass
             them in the order you want displayed (e.g. ascending dose).
-        wells_per_condition: Number of wells assigned to each condition.
+        wells_per_condition: Number of wells assigned to each condition. Can
+            be a single int applied to every condition, a list with one
+            count per condition (same order as `conditions`) for unequal
+            group sizes, or None (default) to auto-fit the largest equal
+            number of wells per condition that divides evenly into the
+            96-well plate.
 
     Returns:
         A dictionary mapping each condition name to its assigned well
@@ -81,17 +103,37 @@ def generate_layout(
 
     Raises:
         ValueError: If the requested layout cannot fit on a 96-well plate,
-            or condition names are empty/duplicated.
+            condition names are empty/duplicated, or a per-condition count
+            list doesn't match the number of conditions.
     """
     if not conditions:
         raise ValueError("At least one condition is required.")
-    if wells_per_condition < 1:
-        raise ValueError("wells_per_condition must be at least 1.")
     if len(set(conditions)) != len(conditions):
         raise ValueError("conditions must not contain duplicate names.")
 
-    total_wells = len(conditions) * wells_per_condition
     plate_wells = all_wells()
+
+    if wells_per_condition is None:
+        counts = [len(plate_wells) // len(conditions)] * len(conditions)
+        if counts[0] < 1:
+            raise ValueError(
+                f"Cannot fit {len(conditions)} conditions on a "
+                f"{len(plate_wells)}-well plate."
+            )
+    elif isinstance(wells_per_condition, int):
+        counts = [wells_per_condition] * len(conditions)
+    else:
+        counts = list(wells_per_condition)
+        if len(counts) != len(conditions):
+            raise ValueError(
+                f"wells_per_condition has {len(counts)} value(s) but there "
+                f"are {len(conditions)} conditions; provide one count per "
+                f"condition or a single value to use for all conditions."
+            )
+    if any(count < 1 for count in counts):
+        raise ValueError("wells_per_condition must be at least 1.")
+
+    total_wells = sum(counts)
     if total_wells > len(plate_wells):
         raise ValueError(
             f"The requested layout needs {total_wells} wells, "
@@ -101,15 +143,14 @@ def generate_layout(
     generator = random.Random(seed)
     selected_wells = generator.sample(plate_wells, total_wells)
 
-    return {
-        condition: sorted(
-            selected_wells[index:index + wells_per_condition],
-            key=_well_sort_key,
+    layout = {}
+    index = 0
+    for condition, count in zip(conditions, counts):
+        layout[condition] = sorted(
+            selected_wells[index:index + count], key=_well_sort_key
         )
-        for index, condition in zip(
-            range(0, total_wells, wells_per_condition), conditions
-        )
-    }
+        index += count
+    return layout
 
 
 def write_layout_csv(layout: dict[str, list[str]], output_path: str | Path) -> None:
@@ -257,8 +298,15 @@ def main() -> None:
     parser.add_argument(
         "--wells-per-condition",
         type=int,
-        default=DEFAULT_WELLS_PER_CONDITION,
-        help="Number of wells assigned to each condition (default: 12).",
+        nargs="+",
+        default=None,
+        help=(
+            "Number of wells assigned to each condition. Give a single "
+            "value to use for every condition, or one value per condition "
+            "(same order as --conditions) for unequal group sizes. Default: "
+            "auto-fit the largest equal count that divides evenly into the "
+            "96-well plate."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -291,10 +339,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    wells_per_condition = args.wells_per_condition
+    if wells_per_condition is not None and len(wells_per_condition) == 1:
+        wells_per_condition = wells_per_condition[0]
+
     layout = generate_layout(
         seed=args.seed,
         conditions=tuple(args.conditions),
-        wells_per_condition=args.wells_per_condition,
+        wells_per_condition=wells_per_condition,
     )
     _print_layout(layout)
     if args.output:
