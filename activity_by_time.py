@@ -46,6 +46,9 @@ import re
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
+from matplotlib.legend_handler import HandlerTuple
 from scipy import stats
 
 from random_layout_generator import ROW_LABELS, generate_layout
@@ -53,6 +56,13 @@ from plot_activity_by_worm_count import load_layout_from_csv, well_to_condition_
 
 TIMESTAMP_RE = re.compile(r"(\d{2})-(\d{2})-(\d{2})")
 FIGSIZE_4_3 = (8, 6)  # Fixed 4:3 aspect ratio for saved figures
+
+# When there are more conditions than colors in the colormap (tab10 has 10),
+# these cycles are indexed by (condition_idx // n_colors) so repeated colors
+# still look distinct via marker/hatch/linestyle.
+MARKER_CYCLE = ["o", "s", "^", "D", "v", "P", "X", "*", "<", ">"]
+HATCH_CYCLE = ["", "//", "xx", "..", "++", "oo"]
+LINESTYLE_CYCLE = ["-", "--", "-.", ":"]
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +234,12 @@ def plot_activity_by_time_grouped(
 
     box_width = 0.7 / n_conditions
     cluster_positions = np.arange(1, n_groups + 1)
+    legend_handles, legend_labels = [], []
 
     for idx, condition in enumerate(conditions):
         color = cmap(idx % cmap.N)
+        marker = MARKER_CYCLE[(idx // cmap.N) % len(MARKER_CYCLE)]
+        hatch = HATCH_CYCLE[(idx // cmap.N) % len(HATCH_CYCLE)]
         offset = (idx - (n_conditions - 1) / 2) * box_width
         positions = cluster_positions + offset
 
@@ -238,7 +251,7 @@ def plot_activity_by_time_grouped(
         ax.boxplot(
             data, positions=positions, widths=box_width * 0.85, patch_artist=True,
             medianprops=dict(color="white", linewidth=1.5),
-            boxprops=dict(facecolor=color, alpha=0.6, edgecolor=color),
+            boxprops=dict(facecolor=color, alpha=0.6, edgecolor=color, hatch=hatch),
             whiskerprops=dict(color=color),
             capprops=dict(color=color),
             flierprops=dict(marker=""),
@@ -248,19 +261,25 @@ def plot_activity_by_time_grouped(
             if not len(values):
                 continue
             jitter = rng.uniform(-box_width * 0.3, box_width * 0.3, size=len(values))
-            ax.scatter(pos + jitter, values, color=color, s=12, alpha=0.6,
+            ax.scatter(pos + jitter, values, color=color, marker=marker, s=16, alpha=0.6,
                        zorder=3, edgecolors="none")
 
-        # Proxy artist so the legend shows a swatch per condition
-        # (boxplot patches aren't directly usable as legend handles).
-        ax.plot([], [], color=color, marker="s", linestyle="", markersize=8, label=condition)
+        # Proxy artist so the legend shows a swatch per condition, matching
+        # both the scatter marker and the box hatch (boxplot patches aren't
+        # directly usable as legend handles).
+        legend_patch = mpatches.Patch(facecolor=color, edgecolor=color, hatch=hatch, alpha=0.6)
+        legend_marker = Line2D([0], [0], color=color, marker=marker, linestyle="", markersize=8)
+        legend_handles.append((legend_patch, legend_marker))
+        legend_labels.append(condition)
+
+    ax.legend(legend_handles, legend_labels, title="Condition", loc="best",
+              handler_map={tuple: HandlerTuple(ndivide=None)})
 
     labels = [f"{p['elapsed_min']:.0f}" for p in points]
     ax.set_xticks(cluster_positions)
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_xlabel("Elapsed time (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
-    ax.legend(title="Condition", loc="best")
 
     plt.tight_layout()
 
@@ -322,16 +341,20 @@ def plot_activity_by_time_line_grouped(
 
     for idx, condition in enumerate(conditions):
         color = cmap(idx % cmap.N)
+        marker = MARKER_CYCLE[(idx // cmap.N) % len(MARKER_CYCLE)]
+        linestyle = LINESTYLE_CYCLE[(idx // cmap.N) % len(LINESTYLE_CYCLE)]
         group_vals = [p.get("values_by_group", {}).get(condition, np.array([])) for p in points]
         means = np.array([np.mean(v) if len(v) else np.nan for v in group_vals])
         stds = np.array([np.std(v) if len(v) else np.nan for v in group_vals])
 
-        ax.errorbar(elapsed, means, yerr=stds, color=color, marker="o", linewidth=2,
-                    label=condition, capsize=4, elinewidth=1.5, zorder=3)
+        ax.errorbar(elapsed, means, yerr=stds, color=color, marker=marker, linestyle=linestyle,
+                    linewidth=2, label=condition, capsize=4, elinewidth=1.5, zorder=3)
 
     ax.set_xlabel("Elapsed time (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
-    ax.legend(title="Condition", loc="best")
+    # Longer legend handles so dash/dot linestyles are actually visible
+    # (the default handlelength is too short to show a full dash pattern).
+    ax.legend(title="Condition", loc="best", handlelength=4, fontsize=9)
 
     plt.tight_layout()
 
