@@ -17,18 +17,29 @@ dose is instead encoded by which subfolder/CSV the data came from).
 For each strain, produces one figure with elapsed time (min) on the
 x-axis and mean +/- SD activity (across wells) on the y-axis, with one
 line per dose (one line per input CSV) so the time-course of each dose
-can be compared directly.
+can be compared directly. By default, the reference strain (--reference_strain,
+"N2") is also overlaid as dashed lines (same per-dose colors, "x" markers)
+on every other strain's plot for easy comparison; use --no_reference to
+disable this.
+
+Figures are saved as PNGs by default (--no_save to skip); pass --show to
+also pop up each figure interactively.
 
 Usage:
     python plot_DRC_perStrain.py \\
         --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01" \\
-        --metric ActValS --save
+        --metric ActValS --reference_strain N2
 
     # Explicit dose folder names / labels (mM), if not the default set
     python plot_DRC_perStrain.py \\
         --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01" \\
         --doses control p0125 p025 --dose_mM 0 0.0125 0.025 \\
-        --metric ActValS --save
+        --metric ActValS
+
+    # Skip the N2 reference overlay, only plot listed strains, and pop up figures
+    python plot_DRC_perStrain.py \\
+        --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01" \\
+        --strains XYZ123 ABC456 --no_reference --show
 """
 
 import argparse
@@ -62,6 +73,10 @@ def load_dose_data(csv_path: str) -> dict[str, dict[float, list[float]]]:
     return data
 
 
+def format_dose_label(dose_mM: float) -> str:
+    return "Control" if dose_mM == 0 else f"{dose_mM:g} mM"
+
+
 def plot_strain_timecourse(
     strain: str,
     doses: list,
@@ -69,30 +84,39 @@ def plot_strain_timecourse(
     dose_data: dict,
     metric: str,
     output_dir: str = None,
+    show: bool = False,
+    reference_strain: str = None,
 ) -> None:
     fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
     cmap = plt.get_cmap("tab10")
 
-    for idx, dose in enumerate(doses):
-        strain_data = dose_data[dose].get(strain)
-        if not strain_data:
-            print(f"[DRCperStrain] Warning: no data for strain={strain!r}, dose={dose!r}")
-            continue
+    # Solid line/circle marker for the strain of interest; dashed line/x
+    # marker (same dose colors) for the reference strain overlay, if any.
+    overlays = [(strain, "-", "o", 1.0)]
+    if reference_strain and reference_strain != strain:
+        overlays.append((reference_strain, "--", "x", 0.7))
 
-        elapsed_sorted = sorted(strain_data.keys())
-        means = np.array([np.mean(strain_data[t]) for t in elapsed_sorted])
-        stds = np.array([np.std(strain_data[t]) for t in elapsed_sorted])
+    for group_strain, linestyle, marker, alpha in overlays:
+        for idx, dose in enumerate(doses):
+            strain_data = dose_data[dose].get(group_strain)
+            if not strain_data:
+                print(f"[DRCperStrain] Warning: no data for strain={group_strain!r}, dose={dose!r}")
+                continue
 
-        color = cmap(idx % cmap.N)
-        marker = MARKER_CYCLE[idx % len(MARKER_CYCLE)]
-        label = "Control" if dose_mM[idx] == 0 else f"{dose_mM[idx]:g} mM"
-        ax.errorbar(elapsed_sorted, means, yerr=stds, color=color, marker=marker,
-                    linewidth=2, capsize=4, elinewidth=1.5, label=label, zorder=3)
+            elapsed_sorted = sorted(strain_data.keys())
+            means = np.array([np.mean(strain_data[t]) for t in elapsed_sorted])
+            stds = np.array([np.std(strain_data[t]) for t in elapsed_sorted])
+
+            color = cmap(idx % cmap.N)
+            label = f"{group_strain} - {format_dose_label(dose_mM[idx])}"
+            ax.errorbar(elapsed_sorted, means, yerr=stds, color=color, marker=marker,
+                        linestyle=linestyle, alpha=alpha, linewidth=2, capsize=4,
+                        elinewidth=1.5, label=label, zorder=3 if group_strain == strain else 2)
 
     ax.set_xlabel("Elapsed time (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
     ax.set_title(strain)
-    ax.legend(title="Levamisole dose", loc="best")
+    ax.legend(title="Strain - dose", loc="best", fontsize=9)
     plt.tight_layout()
 
     if output_dir:
@@ -100,7 +124,10 @@ def plot_strain_timecourse(
         fig.savefig(save_path, dpi=300)
         print(f"[DRCperStrain] Saved: {save_path}")
 
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def main():
@@ -124,11 +151,20 @@ def main():
     parser.add_argument("--strains", nargs="+", default=None,
                         help="Strain names to plot. Defaults to every strain found "
                              "across all dose CSVs.")
-    parser.add_argument("--save", action="store_true",
-                        help="Save each strain's figure as a PNG (into --output_dir).")
+    parser.add_argument("--reference_strain", default="N2",
+                        help="Reference strain overlaid (dashed lines) on every other "
+                             "strain's plot for comparison.")
+    parser.add_argument("--no_reference", action="store_true",
+                        help="Don't overlay --reference_strain on the other strains' plots.")
+    parser.add_argument("--no_save", action="store_true",
+                        help="Don't save figures as PNGs (by default every strain's figure "
+                             "is saved into --output_dir).")
     parser.add_argument("--output_dir", default=None,
                         help="Directory to save PNGs into. Defaults to a 'DRC_plots' "
-                             "subfolder of --input_dir. Only used with --save.")
+                             "subfolder of --input_dir. Ignored with --no_save.")
+    parser.add_argument("--show", action="store_true",
+                        help="Pop up each strain's figure interactively. Off by default — "
+                             "saved PNGs are usually sufficient.")
     args = parser.parse_args()
 
     if len(args.doses) != len(args.dose_mM):
@@ -153,13 +189,15 @@ def main():
     print(f"[DRCperStrain] Plotting {len(strains)} strain(s): {strains}")
 
     output_dir = None
-    if args.save:
+    if not args.no_save:
         output_dir = args.output_dir or os.path.join(args.input_dir, "DRC_plots")
         os.makedirs(output_dir, exist_ok=True)
 
+    reference_strain = None if args.no_reference else args.reference_strain
     for strain in strains:
         plot_strain_timecourse(strain, args.doses, args.dose_mM, dose_data, args.metric,
-                                output_dir=output_dir)
+                                output_dir=output_dir, show=args.show,
+                                reference_strain=reference_strain)
 
 
 if __name__ == "__main__":
