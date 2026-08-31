@@ -19,11 +19,17 @@ plus a mean ± SD line plot (x-axis to scale in elapsed minutes) showing the
 overall temporal trend, and prints summary stats plus the overall
 correlation between elapsed time and activity.
 
+With --export_csv, the processed per-well values are also written to a
+long-format CSV (vidname, seconds, elapsed_min, well, metric, value[,
+condition]) for downstream analysis, alongside a companion "_params.json"
+recording the parameters used to generate it (metric, censor list,
+by_condition, layout/seed, source results files).
+
 Usage:
 
     # python activity_by_time.py --input_dir "D:\\MultiWell_swim\\Preliminary\\08072026_N2_Pyrantel_DRC_test02" \\
     # --by_condition --layout "C:\\Users\\jl200\\Dropbox\\JHU_2026_spring\\Multiwell_swim\\Well_assignment_0804\\Pyrantel_dose_layout.csv" \\
-    # --save --censor C5
+    # --save --censor C5 --export_csv
     
     # Auto-discover all "<video>_output" subfolders under a parent directory
     python activity_by_time.py \\
@@ -36,13 +42,20 @@ Usage:
     python activity_by_time.py \\
         --results "video0000..._results.json" "video0005..._results.json" \\
         --metric ActValS --save
+
+    # Export the processed data + run parameters for downstream analysis
+    python activity_by_time.py \\
+        --input_dir "D:\\MultiWell_swim\\Preliminary\\07172026_N2_sorter_edge_effect" \\
+        --metric ActValS --censor G10 G11 G12 --export_csv
 """
 
 import argparse
+import csv
 import glob
 import json
 import os
 import re
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -140,6 +153,7 @@ def load_time_points(
             "path": path,
             "vidname": vidname,
             "seconds": seconds,
+            "wells": [well for well, k in zip(labels, keep) if k],
             "values": flat[keep],
             "n_total": len(labels),
             "n_censored": len(censor & set(labels)),
@@ -166,6 +180,60 @@ def load_time_points(
         p["elapsed_min"] = (p["seconds"] - t0) / 60.0
 
     return points
+
+
+# ---------------------------------------------------------------------------
+# Export processed data / run parameters
+# ---------------------------------------------------------------------------
+
+def export_time_series_csv(
+    points: list,
+    metric: str,
+    csv_path: str,
+    well_to_group: dict | None = None,
+) -> None:
+    """Write per-well activity values (long format, one row per well per
+    time point) so results can be loaded into pandas/Excel/R downstream.
+    """
+    header = ["vidname", "seconds", "elapsed_min", "well", "metric", "value"]
+    if well_to_group is not None:
+        header.append("condition")
+    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(header)
+        for p in points:
+            for well, value in zip(p["wells"], p["values"]):
+                row = [p["vidname"], p["seconds"], f"{p['elapsed_min']:.4f}", well, metric, value]
+                if well_to_group is not None:
+                    row.append(well_to_group.get(well, ""))
+                writer.writerow(row)
+    print(f"[ActivityByTime] Exported data: {csv_path}")
+
+
+def export_run_metadata(
+    json_path: str,
+    args: argparse.Namespace,
+    results_paths: list,
+    condition_order: list | None,
+) -> None:
+    """Record the parameters used to generate the exported data (censor
+    list, metric, layout/seed, source files, etc.) alongside the CSV so the
+    export is reproducible without re-reading this script's defaults.
+    """
+    metadata = {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "metric": args.metric,
+        "censor": sorted(set(args.censor)),
+        "by_condition": args.by_condition,
+        "results_files": [os.path.abspath(p) for p in results_paths],
+    }
+    if args.by_condition:
+        metadata["layout_csv"] = os.path.abspath(args.layout) if args.layout else None
+        metadata["seed"] = args.seed if not args.layout else None
+        metadata["conditions"] = condition_order
+    with open(json_path, "w", encoding="utf-8") as fh:
+        json.dump(metadata, fh, indent=2)
+    print(f"[ActivityByTime] Saved run parameters: {json_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +476,13 @@ def main():
                         help="Save the figure as a PNG.")
     parser.add_argument("--output", default=None,
                         help="Explicit output PNG path (overrides the --save default path).")
+    parser.add_argument("--export_csv", action="store_true",
+                        help="Export the processed per-well activity values (long format) to a "
+                             "CSV for downstream analysis, plus a companion '_params.json' "
+                             "recording the parameters used to generate it (metric, censor list, "
+                             "layout/seed, source files).")
+    parser.add_argument("--export_path", default=None,
+                        help="Explicit output CSV path (overrides the --export_csv default path).")
     args = parser.parse_args()
 
     if args.input_dir:
@@ -470,6 +545,13 @@ def main():
     if save_path is None and args.save:
         save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}{suffix}.png")
         line_save_path = os.path.join(out_dir, f"activity_by_time_{args.metric}{suffix}_line.png")
+
+    if args.export_csv:
+        export_path = args.export_path or os.path.join(
+            out_dir, f"activity_by_time_{args.metric}{suffix}_data.csv")
+        metadata_path = f"{os.path.splitext(export_path)[0]}_params.json"
+        export_time_series_csv(points, args.metric, export_path, well_to_group=well_to_group)
+        export_run_metadata(metadata_path, args, results_paths, condition_order)
 
     if args.by_condition:
         plot_activity_by_time_grouped(points, args.metric, condition_order, save_path=save_path)
