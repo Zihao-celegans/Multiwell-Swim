@@ -25,11 +25,14 @@ condition]) for downstream analysis, alongside a companion "_params.json"
 recording the parameters used to generate it (metric, censor list,
 by_condition, layout/seed, source results files).
 
+Use --title / --legend_title to customize the plot title and legend title
+on the saved/displayed figures (legend title only applies with --by_condition).
+
 Usage:
 
     # python activity_by_time.py --input_dir "D:\\MultiWell_swim\\Preliminary\\08072026_N2_Pyrantel_DRC_test02" \\
     # --by_condition --layout "C:\\Users\\jl200\\Dropbox\\JHU_2026_spring\\Multiwell_swim\\Well_assignment_0804\\Pyrantel_dose_layout.csv" \\
-    # --save --censor C5 --export_csv
+    # --save --censor C5 --export_csv --title "Pyrantel DRC — N2" --legend_title "LEVA dose"
     
     # Auto-discover all "<video>_output" subfolders under a parent directory
     python activity_by_time.py \\
@@ -47,6 +50,12 @@ Usage:
     python activity_by_time.py \\
         --input_dir "D:\\MultiWell_swim\\Preliminary\\07172026_N2_sorter_edge_effect" \\
         --metric ActValS --censor G10 G11 G12 --export_csv
+
+    # Custom plot title / legend title
+    python activity_by_time.py \\
+        --input_dir "D:\\MultiWell_swim\\Preliminary\\08072026_N2_Pyrantel_DRC_test02" \\
+        --by_condition --layout "...\\Pyrantel_dose_layout.csv" \\
+        --title "Pyrantel DRC — N2" --legend_title "Dose" --save
 """
 
 import argparse
@@ -240,7 +249,7 @@ def export_run_metadata(
 # Plot
 # ---------------------------------------------------------------------------
 
-def plot_activity_by_time(points: list, metric: str, save_path: str = None) -> None:
+def plot_activity_by_time(points: list, metric: str, save_path: str = None, title: str = None) -> None:
     n_groups = len(points)
     fig, ax = plt.subplots(figsize=FIGSIZE_4_3)
     rng = np.random.default_rng(0)
@@ -270,6 +279,8 @@ def plot_activity_by_time(points: list, metric: str, save_path: str = None) -> N
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_xlabel("Elapsed time since first video (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    if title:
+        ax.set_title(title)
 
     plt.tight_layout()
 
@@ -284,6 +295,8 @@ def plot_activity_by_time_grouped(
     metric: str,
     conditions: list,
     save_path: str = None,
+    title: str = None,
+    legend_title: str = "Condition",
 ) -> None:
     """Box + strip plot of per-well activity vs. elapsed time, with one
     box (plus jittered individual points) per condition at each time point.
@@ -340,7 +353,7 @@ def plot_activity_by_time_grouped(
         legend_handles.append((legend_patch, legend_marker))
         legend_labels.append(condition)
 
-    ax.legend(legend_handles, legend_labels, title="Condition", loc="best",
+    ax.legend(legend_handles, legend_labels, title=legend_title, loc="best",
               handler_map={tuple: HandlerTuple(ndivide=None)})
 
     labels = [f"{p['elapsed_min']:.0f}" for p in points]
@@ -348,6 +361,8 @@ def plot_activity_by_time_grouped(
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_xlabel("Elapsed time (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    if title:
+        ax.set_title(title)
 
     plt.tight_layout()
 
@@ -361,7 +376,7 @@ def plot_activity_by_time_grouped(
 # Mean ± SD line plots
 # ---------------------------------------------------------------------------
 
-def plot_activity_by_time_line(points: list, metric: str, save_path: str = None) -> None:
+def plot_activity_by_time_line(points: list, metric: str, save_path: str = None, title: str = None) -> None:
     """Mean ± SD line plot of per-well activity vs. elapsed time (pooled
     across all wells). X-axis is to scale in elapsed minutes, unlike the
     box plot's evenly-spaced categorical positions, so it accurately shows
@@ -378,6 +393,8 @@ def plot_activity_by_time_line(points: list, metric: str, save_path: str = None)
 
     ax.set_xlabel("Elapsed time since first video (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    if title:
+        ax.set_title(title)
 
     plt.tight_layout()
 
@@ -392,6 +409,8 @@ def plot_activity_by_time_line_grouped(
     metric: str,
     conditions: list,
     save_path: str = None,
+    title: str = None,
+    legend_title: str = "Condition",
 ) -> None:
     """Mean ± SD line plot of per-well activity vs. elapsed time, with one
     line (+ shaded SD band) per condition. X-axis is to scale in elapsed
@@ -420,9 +439,11 @@ def plot_activity_by_time_line_grouped(
 
     ax.set_xlabel("Elapsed time (min)", fontsize=11)
     ax.set_ylabel(f"{metric} - Active pixels (A.U.)", fontsize=11)
+    if title:
+        ax.set_title(title)
     # Longer legend handles so dash/dot linestyles are actually visible
     # (the default handlelength is too short to show a full dash pattern).
-    ax.legend(title="Condition", loc="best", handlelength=4, fontsize=9)
+    ax.legend(title=legend_title, loc="best", handlelength=4, fontsize=9)
 
     plt.tight_layout()
 
@@ -476,6 +497,10 @@ def main():
                         help="Save the figure as a PNG.")
     parser.add_argument("--output", default=None,
                         help="Explicit output PNG path (overrides the --save default path).")
+    parser.add_argument("--title", default=None,
+                        help="Plot title, applied to both the box plot and the line plot.")
+    parser.add_argument("--legend_title", default="Condition",
+                        help="Legend title. Only used with --by_condition.")
     parser.add_argument("--export_csv", action="store_true",
                         help="Export the processed per-well activity values (long format) to a "
                              "CSV for downstream analysis, plus a companion '_params.json' "
@@ -554,11 +579,13 @@ def main():
         export_run_metadata(metadata_path, args, results_paths, condition_order)
 
     if args.by_condition:
-        plot_activity_by_time_grouped(points, args.metric, condition_order, save_path=save_path)
-        plot_activity_by_time_line_grouped(points, args.metric, condition_order, save_path=line_save_path)
+        plot_activity_by_time_grouped(points, args.metric, condition_order, save_path=save_path,
+                                       title=args.title, legend_title=args.legend_title)
+        plot_activity_by_time_line_grouped(points, args.metric, condition_order, save_path=line_save_path,
+                                            title=args.title, legend_title=args.legend_title)
     else:
-        plot_activity_by_time(points, args.metric, save_path=save_path)
-        plot_activity_by_time_line(points, args.metric, save_path=line_save_path)
+        plot_activity_by_time(points, args.metric, save_path=save_path, title=args.title)
+        plot_activity_by_time_line(points, args.metric, save_path=line_save_path, title=args.title)
 
 
 if __name__ == "__main__":
