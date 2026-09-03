@@ -20,10 +20,13 @@ Traits implemented so far:
     auc_norm  auc / A0 (minutes) — the run length a well would need to spend at
               its own baseline activity to accumulate the same area, which
               removes differences in absolute starting activity between wells
+    slope_init  early slope (A.U. per minute) from an OLS straight-line fit of
+                activity vs time over the first --slope_points timepoints.
+                Reported as fitted, so a decaying well is negative
 
-Alongside the per-well CSV it saves a grouped box plot of both AUC traits
-(median/quartiles across wells, with the individual wells overlaid) for every
-strain x dose combination.
+Alongside the per-well CSV it saves grouped box plots (median/quartiles across
+wells, with the individual wells overlaid) for every strain x dose
+combination: one figure for the AUC traits and one for the initial slope.
 
 Usage:
     python curve_traits.py --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01"
@@ -74,6 +77,18 @@ def compute_auc_norm(auc: float, A0: float) -> float:
     return auc / A0 if A0 > 0 else float("nan")
 
 
+def compute_slope_init(t: np.ndarray, y: np.ndarray, n_points: int) -> float:
+    """OLS slope of activity vs time over the first n_points, in A.U./min.
+
+    Straight line through the raw values, so the sign is as fitted: negative
+    while activity is falling.
+    """
+    n = min(n_points, len(y))
+    if n < 2:
+        return float("nan")
+    return float(np.polyfit(t[:n], y[:n], 1)[0])
+
+
 def iter_wells(input_dir: str, doses: list[str], dose_mM: list[float], metric: str):
     """Yield (dose, dose_mM, strain, well, t, y) for every well, with t and y
     as float arrays sorted by elapsed time.
@@ -110,10 +125,11 @@ def format_dose_label(dose_mM: float) -> str:
     return "Control" if dose_mM == 0 else f"{dose_mM:g} mM"
 
 
-def plot_auc_summary(rows: list[dict], metric: str, output_dir: str = None,
-                     show: bool = False) -> None:
-    """Grouped box plots of auc and auc_norm, with the individual wells
-    overlaid so unequal replicate counts stay visible.
+def plot_trait_boxes(rows: list[dict], panels: list[tuple], title: str, filename: str,
+                     output_dir: str = None, show: bool = False) -> None:
+    """Grouped box plots of the given (trait, ylabel) panels, one box per
+    strain x dose, with the individual wells overlaid so unequal replicate
+    counts stay visible.
     """
     strains = sorted({r["strain"] for r in rows})
     doses = list(dict.fromkeys(r["dose"] for r in rows))
@@ -123,9 +139,9 @@ def plot_auc_summary(rows: list[dict], metric: str, output_dir: str = None,
     for row in rows:
         grouped.setdefault((row["strain"], row["dose"]), []).append(row)
 
-    panels = [("auc", f"{metric} AUC (A.U. x min)"),
-              ("auc_norm", f"{metric} AUC / A0 (min)")]
-    fig, axes = plt.subplots(len(panels), 1, figsize=(13, 9), sharex=True)
+    fig, axes = plt.subplots(len(panels), 1, figsize=(13, 4.5 * len(panels)),
+                             sharex=True, squeeze=False)
+    axes = axes[:, 0]
     cmap = plt.get_cmap("tab10")
     width = 0.8 / len(doses)
     x = np.arange(len(strains))
@@ -164,19 +180,21 @@ def plot_auc_summary(rows: list[dict], metric: str, output_dir: str = None,
         for boundary in x[:-1] + 0.5:
             ax.axvline(boundary, color="gray", linestyle="--", linewidth=0.8,
                        alpha=0.6, zorder=1)
+        if ax.get_ylim()[0] < 0 < ax.get_ylim()[1]:
+            ax.axhline(0, color="black", linewidth=0.9, alpha=0.7, zorder=1)
 
     axes[0].legend(handles=[Patch(facecolor=cmap(i % cmap.N), alpha=0.75, edgecolor="black",
                                   label=format_dose_label(dose_mM[d]))
                             for i, d in enumerate(doses)],
                    title="Dose", loc="best", fontsize=9)
-    axes[0].set_title(f"{metric} area under the activity curve, by strain and dose")
+    axes[0].set_title(title)
     axes[-1].set_xticks(x)
     axes[-1].set_xticklabels(strains, rotation=45, ha="right")
     axes[-1].set_xlim(-0.6, len(strains) - 0.4)
     plt.tight_layout()
 
     if output_dir:
-        save_path = os.path.join(output_dir, f"curve_traits_{metric}_auc.png")
+        save_path = os.path.join(output_dir, filename)
         fig.savefig(save_path, dpi=300)
         print(f"[traits] Saved: {save_path}")
 
@@ -202,6 +220,8 @@ def main():
     parser.add_argument("--metric", default="ActValS",
                         help="Activity metric — must match the --metric used when the "
                              "CSVs were exported by activity_by_time.py.")
+    parser.add_argument("--slope_points", type=int, default=3,
+                        help="Number of leading timepoints used for the slope_init line fit.")
     parser.add_argument("--output_dir", default=None,
                         help="Directory for the trait CSV. Defaults to a 'traits' subfolder "
                              "of --input_dir.")
@@ -233,6 +253,7 @@ def main():
             "A0": A0,
             "auc": auc,
             "auc_norm": compute_auc_norm(auc, A0),
+            "slope_init": compute_slope_init(t, y, args.slope_points),
         })
 
     output_dir = args.output_dir or os.path.join(args.input_dir, "traits")
@@ -240,7 +261,18 @@ def main():
     write_csv(os.path.join(output_dir, f"curve_traits_{args.metric}_per_well.csv"), rows)
 
     if not args.no_plot:
-        plot_auc_summary(rows, args.metric, output_dir=output_dir, show=args.show)
+        plot_trait_boxes(rows,
+                         [("auc", f"{args.metric} AUC (A.U. x min)"),
+                          ("auc_norm", f"{args.metric} AUC / A0 (min)")],
+                         f"{args.metric} area under the activity curve, by strain and dose",
+                         f"curve_traits_{args.metric}_auc.png",
+                         output_dir=output_dir, show=args.show)
+        plot_trait_boxes(rows,
+                         [("slope_init", f"{args.metric} initial slope (A.U./min)")],
+                         f"{args.metric} initial decay rate over the first {args.slope_points} "
+                         f"timepoints, by strain and dose",
+                         f"curve_traits_{args.metric}_slope.png",
+                         output_dir=output_dir, show=args.show)
 
 
 if __name__ == "__main__":
