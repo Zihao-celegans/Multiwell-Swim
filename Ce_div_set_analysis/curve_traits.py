@@ -23,6 +23,8 @@ Traits implemented so far:
     slope_init  early slope (A.U. per minute) from an OLS straight-line fit of
                 activity vs time over the first --slope_points timepoints.
                 Reported as fitted, so a decaying well is negative
+    slope_final same fit over the last --final_slope_points timepoints, so a
+                well that is recovering by the end of the run is positive
 
 Alongside the per-well CSV it saves grouped box plots (median/quartiles across
 wells, with the individual wells overlaid) for every strain x dose
@@ -87,6 +89,18 @@ def compute_slope_init(t: np.ndarray, y: np.ndarray, n_points: int) -> float:
     if n < 2:
         return float("nan")
     return float(np.polyfit(t[:n], y[:n], 1)[0])
+
+
+def compute_slope_final(t: np.ndarray, y: np.ndarray, n_points: int) -> float:
+    """OLS slope of activity vs time over the last n_points, in A.U./min.
+
+    Same convention as compute_slope_init, so a well still falling at the end
+    of the run is negative and one that has turned around is positive.
+    """
+    n = min(n_points, len(y))
+    if n < 2:
+        return float("nan")
+    return float(np.polyfit(t[-n:], y[-n:], 1)[0])
 
 
 def iter_wells(input_dir: str, doses: list[str], dose_mM: list[float], metric: str):
@@ -222,6 +236,8 @@ def main():
                              "CSVs were exported by activity_by_time.py.")
     parser.add_argument("--slope_points", type=int, default=3,
                         help="Number of leading timepoints used for the slope_init line fit.")
+    parser.add_argument("--final_slope_points", type=int, default=5,
+                        help="Number of trailing timepoints used for the slope_final line fit.")
     parser.add_argument("--output_dir", default=None,
                         help="Directory for the trait CSV. Defaults to a 'traits' subfolder "
                              "of --input_dir.")
@@ -254,6 +270,7 @@ def main():
             "auc": auc,
             "auc_norm": compute_auc_norm(auc, A0),
             "slope_init": compute_slope_init(t, y, args.slope_points),
+            "slope_final": compute_slope_final(t, y, args.final_slope_points),
         })
 
     output_dir = args.output_dir or os.path.join(args.input_dir, "traits")
@@ -268,9 +285,10 @@ def main():
                          f"curve_traits_{args.metric}_auc.png",
                          output_dir=output_dir, show=args.show)
         plot_trait_boxes(rows,
-                         [("slope_init", f"{args.metric} initial slope (A.U./min)")],
-                         f"{args.metric} initial decay rate over the first {args.slope_points} "
-                         f"timepoints, by strain and dose",
+                         [("slope_init", f"{args.metric} initial slope (A.U./min)"),
+                          ("slope_final", f"{args.metric} final slope (A.U./min)")],
+                         f"{args.metric} slope over the first {args.slope_points} and last "
+                         f"{args.final_slope_points} timepoints, by strain and dose",
                          f"curve_traits_{args.metric}_slope.png",
                          output_dir=output_dir, show=args.show)
 
