@@ -201,7 +201,8 @@ def plot_trait_boxes(rows: list[dict], panels: list[tuple], title: str, filename
                                   label=format_dose_label(dose_mM[d]))
                             for i, d in enumerate(doses)],
                    title="Dose", loc="best", fontsize=9)
-    axes[0].set_title(title)
+    if title:
+        axes[0].set_title(title)
     axes[-1].set_xticks(x)
     axes[-1].set_xticklabels(strains, rotation=45, ha="right")
     axes[-1].set_xlim(-0.6, len(strains) - 0.4)
@@ -254,10 +255,13 @@ def main():
         )
 
     rows = []
+    init_spans, final_spans = [], []
     for dose, conc, strain, well, t, y in iter_wells(
             args.input_dir, args.doses, args.dose_mM, args.metric):
         auc = compute_auc(t, y)
         A0 = float(y[0])
+        init_spans.append(t[min(args.slope_points, len(t)) - 1] - t[0])
+        final_spans.append(t[-1] - t[-min(args.final_slope_points, len(t))])
         rows.append({
             "dose": dose,
             "dose_mM": conc,
@@ -279,17 +283,22 @@ def main():
 
     if not args.no_plot:
         plot_trait_boxes(rows,
-                         [("auc", f"{args.metric} AUC (A.U. x min)"),
-                          ("auc_norm", f"{args.metric} AUC / A0 (min)")],
-                         f"{args.metric} area under the activity curve, by strain and dose",
+                         [("auc", "AUC (A.U. x min)"),
+                          ("auc_norm", "AUC / A0 (min)")],
+                         None,
                          f"curve_traits_{args.metric}_auc.png",
                          output_dir=output_dir, show=args.show)
         plot_trait_boxes(rows,
-                         [("slope_init", f"{args.metric} initial slope (A.U./min)"),
-                          ("slope_final", f"{args.metric} final slope (A.U./min)")],
-                         f"{args.metric} slope over the first {args.slope_points} and last "
-                         f"{args.final_slope_points} timepoints, by strain and dose",
-                         f"curve_traits_{args.metric}_slope.png",
+                         [("slope_init", f"Initial slope (A.U./min), first "
+                                         f"{np.median(init_spans) / 60:.0f} h")],
+                         None,
+                         f"curve_traits_{args.metric}_slope_init.png",
+                         output_dir=output_dir, show=args.show)
+        plot_trait_boxes(rows,
+                         [("slope_final", f"Final slope (A.U./min), last "
+                                          f"{np.median(final_spans) / 60:.0f} h")],
+                         None,
+                         f"curve_traits_{args.metric}_slope_final.png",
                          output_dir=output_dir, show=args.show)
 
 
