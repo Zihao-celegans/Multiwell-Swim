@@ -68,13 +68,14 @@ import argparse
 import json
 import os
 import sys
+from collections import deque
 from datetime import datetime
 
 import numpy as np
 from scipy.signal import convolve2d
 import matplotlib.pyplot as plt
 
-from utils import load_roi, read_video_grayscale
+from utils import load_roi, probe_video, read_video_frame, iter_video_frames_grayscale
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +194,7 @@ def _roi_activity(img_dif: np.ndarray, roi: dict,
 # Parameter preview (mirrors MATLAB "are you happy" loop)
 # ---------------------------------------------------------------------------
 
-def _parameter_preview(all_frames: np.ndarray, fps: int,
+def _parameter_preview(video_path: str, num_frames: int, fps: int,
                         gau: np.ndarray, noise_threshold: float) -> None:
     """Show raw normalised diff and thresholded diff for a representative frame pair.
 
@@ -209,11 +210,13 @@ def _parameter_preview(all_frames: np.ndarray, fps: int,
     For the full-image preview we use nan_to_num(0) before convolution
     because the image is large and sparse NaN propagation would hide activity;
     this preview is only for visual parameter tuning and does not affect output.
-    """
-    frame_b_idx = min(fps, all_frames.shape[2] - 1)
 
-    sample1 = all_frames[:, :, 0].astype(np.float64)
-    sample2 = all_frames[:, :, frame_b_idx].astype(np.float64)
+    Only the two needed frames are read (via seek), not the whole video.
+    """
+    frame_b_idx = min(fps, num_frames - 1)
+
+    sample1 = read_video_frame(video_path, 0).astype(np.float64)
+    sample2 = read_video_frame(video_path, frame_b_idx).astype(np.float64)
 
     diff1 = _normalised_diff(sample1, sample2)
 
@@ -277,12 +280,12 @@ def analyse(video_path: str, roi_path: str, output_path: str,
     num_roi   = len(roi_list)
     print(f"[Activity]   {num_row}×{num_col} = {num_roi} wells")
 
-    # ── Load video ────────────────────────────────────────────────────────────
-    print(f"[Activity] Loading video: {video_path}")
-    all_frames = read_video_grayscale(video_path)    # (H, W, N_frames) float32
-    num_frames = all_frames.shape[2]
-    print(f"[Activity]   {num_frames} frames,  "
-          f"image size {all_frames.shape[1]}×{all_frames.shape[0]} (W×H)")
+    # ── Probe video (metadata only — does not decode/load frames) ────────────
+    print(f"[Activity] Reading video info: {video_path}")
+    video_info = probe_video(video_path)
+    num_frames_estimate = video_info["frame_count"]
+    print(f"[Activity]   ~{num_frames_estimate} frames (estimate),  "
+          f"image size {video_info['width']}×{video_info['height']} (W×H)")
 
     # ── Parameter-preview loop ────────────────────────────────────────────────
     # Mirrors MATLAB:
@@ -291,7 +294,7 @@ def analyse(video_path: str, roi_path: str, output_path: str,
     happy = False
     while not happy:
         gau = build_gaussian_kernel(gaussian_std)
-        _parameter_preview(all_frames, fps_int, gau, noise_threshold)
+        _parameter_preview(video_path, num_frames_estimate, fps_int, gau, noise_threshold)
 
         print("\n[Activity] Current parameters:")
         print(f"  fps             = {fps}")
@@ -323,61 +326,77 @@ def analyse(video_path: str, roi_path: str, output_path: str,
             except ValueError:
                 print("  Invalid input — keeping current values.")
 
-    # ── Allocate output arrays ────────────────────────────────────────────────
-    # Mirrors MATLAB: ActVal = nan(NumROI, NumFrames)
-    # Column indices 0 … num_frames-2 will be filled (one per frame transition).
-    # Column num_frames-1 stays NaN and is excluded by nanmean.
-    act_val   = np.full((num_roi, num_frames), np.nan)
-    act_val_s = np.full((num_roi, num_frames), np.nan)
-
     # ── Main frame loop ───────────────────────────────────────────────────────
     # MATLAB:  NumA = 1 … NumFrames  (1-indexed)
     # Python:  frame_idx = 0 … num_frames-1  (0-indexed),  NumA = frame_idx + 1
     #
-    # Storage index mapping:
-    #   MATLAB ActVal(n, NumA-1) = Python act_val[n, frame_idx - 1]
-    #   When frame_idx=1 (NumA=2): store at 0.
-    #   When frame_idx=k          : store at k-1.
+    # Frames are streamed one at a time (iter_video_frames_grayscale) instead
+    # of loading the whole video into RAM. ImgC needs the frame `frame_skip`
+    # steps back, so a rolling buffer of the last `frame_skip` frames (float32)
+    # is kept instead of the full array — memory use no longer scales with
+    # video length/resolution.
+    #
+    # Columns are collected as they're computed (num_frames isn't known exactly
+    # ahead of time — CAP_PROP_FRAME_COUNT is only an estimate for some
+    # codecs/containers) and stacked into arrays once streaming finishes.
     print("\n[Activity] Starting frame-by-frame analysis…")
 
-    for frame_idx in range(1, num_frames):
-        # Current frame (ImgA) and previous frame (ImgB) — float64 for diff
-        img_a = all_frames[:, :, frame_idx].astype(np.float64)
-        img_b = all_frames[:, :, frame_idx - 1].astype(np.float64)
+    act_val_cols = []      # each: (num_roi,) — one per frame transition
+    act_val_s_cols = []    # aligned index-for-index with act_val_cols
+    buffer = deque(maxlen=max(frame_skip, 1))   # previous `frame_skip` frames, oldest first
 
-        # Normalised difference for adjacent frames
-        # MATLAB: ImgDif = abs(double(ImgA - ImgB)) ./ double(ImgA + ImgB)
-        img_dif = _normalised_diff(img_a, img_b)
+    frame_idx = 0
+    for frame in iter_video_frames_grayscale(video_path):
+        img_a = frame.astype(np.float64)
 
-        # Storage column: NumA-1 (MATLAB 1-indexed) = frame_idx-1 (Python 0-indexed)
-        store_idx = frame_idx - 1
+        if frame_idx >= 1:
+            # Previous frame (ImgB) — float64 for diff
+            img_b = buffer[-1].astype(np.float64)
 
-        for n, roi in enumerate(roi_list):
-            act_val[n, store_idx] = _roi_activity(img_dif, roi, gau, noise_threshold)
+            # Normalised difference for adjacent frames
+            # MATLAB: ImgDif = abs(double(ImgA - ImgB)) ./ double(ImgA + ImgB)
+            img_dif = _normalised_diff(img_a, img_b)
 
-        # ActValS: compare current frame with frame `frame_skip` steps earlier
-        # MATLAB condition: NumA > 1 + frameSkip
-        #   → (frame_idx + 1) > 1 + frame_skip
-        #   →  frame_idx > frame_skip
-        if frame_idx > frame_skip:
-            img_c = all_frames[:, :, frame_idx - frame_skip].astype(np.float64)
+            act_val_cols.append(np.array(
+                [_roi_activity(img_dif, roi, gau, noise_threshold) for roi in roi_list]
+            ))
 
-            # MATLAB: ImgDifSkip = abs(double(ImgA - ImgC)) ./ double(ImgA + ImgC)
-            img_dif_skip = _normalised_diff(img_a, img_c)
+            # ActValS: compare current frame with frame `frame_skip` steps earlier
+            # MATLAB condition: NumA > 1 + frameSkip  →  frame_idx > frame_skip
+            if frame_idx > frame_skip:
+                img_c = buffer[0].astype(np.float64)
 
-            for n, roi in enumerate(roi_list):
-                act_val_s[n, store_idx] = _roi_activity(
-                    img_dif_skip, roi, gau, noise_threshold
-                )
+                # MATLAB: ImgDifSkip = abs(double(ImgA - ImgC)) ./ double(ImgA + ImgC)
+                img_dif_skip = _normalised_diff(img_a, img_c)
 
-        # Progress (mirrors MATLAB fprintf per frame)
-        if frame_idx % 10 == 0 or frame_idx == num_frames - 1:
-            print(
-                f"  [Activity] Frame transition {frame_idx:4d} / {num_frames - 1}",
-                end="\r",
-            )
+                act_val_s_cols.append(np.array(
+                    [_roi_activity(img_dif_skip, roi, gau, noise_threshold) for roi in roi_list]
+                ))
+            else:
+                act_val_s_cols.append(np.full(num_roi, np.nan))
 
+            # Progress (mirrors MATLAB fprintf per frame)
+            if frame_idx % 10 == 0:
+                print(f"  [Activity] Frame transition {frame_idx:4d}", end="\r")
+
+        buffer.append(frame)   # kept as float32 to minimise buffer memory
+        frame_idx += 1
+
+    num_frames = frame_idx   # actual count, now that streaming is done
     print(f"\n[Activity] Complete — processed {num_frames - 1} frame transitions.")
+
+    # ── Stack into (num_roi, num_frames) arrays ───────────────────────────────
+    # Mirrors MATLAB: ActVal = nan(NumROI, NumFrames)
+    # Column indices 0 … num_frames-2 are filled (one per frame transition).
+    # Column num_frames-1 stays NaN and is excluded by nanmean.
+    if act_val_cols:
+        act_val   = np.column_stack(act_val_cols)
+        act_val_s = np.column_stack(act_val_s_cols)
+    else:
+        act_val   = np.empty((num_roi, 0))
+        act_val_s = np.empty((num_roi, 0))
+    act_val   = np.hstack([act_val,   np.full((num_roi, 1), np.nan)])
+    act_val_s = np.hstack([act_val_s, np.full((num_roi, 1), np.nan)])
 
     # ── Average over frame transitions, reshape to (NumRow, NumCol) ───────────
     # MATLAB:
