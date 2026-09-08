@@ -32,6 +32,7 @@ combination: one figure for the AUC traits and one for the initial slope.
 
 Usage:
     python curve_traits.py --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01"
+    python curve_traits.py --input_dir "E:\\MultiWell_swim\\09062026_CeDiv_Pyrantel_test01" --doses control p25 1 --dose_mM 0 0.25 1
 """
 
 import argparse
