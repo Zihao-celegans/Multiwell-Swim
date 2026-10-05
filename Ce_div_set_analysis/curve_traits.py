@@ -30,6 +30,19 @@ Alongside the per-well CSV it saves grouped box plots (median/quartiles across
 wells, with the individual wells overlaid) for every strain x dose
 combination: one figure for the AUC traits and one for the initial slope.
 
+Separately from the traits, it also plots the control-normalized activity
+time-course: each well's activity at every timepoint is normalized to the
+median of the same strain's control (0 mM) wells at that timepoint, in two ways:
+    delta  activity minus control median (net drug effect, control at 0)
+           curve_traits_<metric>_timecourse_delta.png
+    ratio  activity / control median (fold of control, control at 1)
+           curve_traits_<metric>_timecourse_ratio.png
+Each is shown per strain as median +/- quartiles across wells, one line per
+dose. For each non-control dose it also saves a figure with all strains
+overlaid (curve_traits_<metric>_timecourse_<delta|ratio>_all_strains_<dose>.png,
+median +/- quartiles). Dose sessions are matched by nearest elapsed time within
+--time_tol_min. The traits themselves are still computed on the raw activity.
+
 Usage:
     python curve_traits.py --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01"
     python curve_traits.py --input_dir "E:\\MultiWell_swim\\09062026_CeDiv_Pyrantel_test01" --doses control p25 1 --dose_mM 0 0.25 1
@@ -220,6 +233,163 @@ def plot_trait_boxes(rows: list[dict], panels: list[tuple], title: str, filename
         plt.close(fig)
 
 
+NORMALIZATIONS = {
+    # mode -> (operation, reference level of the control, y label, file tag, legend loc)
+    "delta": (lambda y, c: y - c, 0.0, "{metric} minus control median (A.U.)", "delta", "lower left"),
+    "ratio": (lambda y, c: y / c, 1.0, "{metric} / control median", "ratio", "best"),
+}
+
+
+def control_normalized_timecourses(wells: list[tuple], tol_min: float,
+                                   mode: str) -> dict[tuple, dict[float, list[float]]]:
+    """Each well's activity normalized to the median of the same strain's
+    control (0 mM) wells at the same timepoint: mode "delta" subtracts it (net
+    drug effect), mode "ratio" divides by it (fold of control).
+
+    Each dose is its own session, so a well's elapsed times are matched to the
+    nearest control timepoint within tol_min (unmatched points are dropped, as
+    are points whose control median is 0 in ratio mode).
+    Returns (strain, dose) -> control elapsed time -> [per-well normalized
+    activity], so wells from different sessions share one x value per timepoint.
+    """
+    op = NORMALIZATIONS[mode][0]
+    pooled: dict[str, dict[float, list[float]]] = {}
+    for dose, conc, strain, well, t, y in wells:
+        if conc == 0:
+            for tt, yy in zip(t, y):
+                pooled.setdefault(strain, {}).setdefault(round(float(tt), 4), []).append(float(yy))
+    if not pooled:
+        raise SystemExit("[traits] No control (0 mM) dose in --dose_mM; it is needed for "
+                         "the control-normalized time-course.")
+    ctrl = {s: (np.array(sorted(d)), np.array([np.median(d[k]) for k in sorted(d)]))
+            for s, d in pooled.items()}
+
+    out: dict[tuple, dict[float, list[float]]] = {}
+    dropped = set()
+    for dose, conc, strain, well, t, y in wells:
+        if strain not in ctrl:
+            if strain not in dropped:
+                dropped.add(strain)
+                print(f"[traits]   no control wells for strain {strain!r}: not in the "
+                      f"control-normalized time-course")
+            continue
+        ctrl_t, ctrl_med = ctrl[strain]
+        nearest = np.abs(t[:, None] - ctrl_t[None, :]).argmin(axis=1)
+        keep = np.abs(t - ctrl_t[nearest]) <= tol_min
+        if mode == "ratio":
+            keep &= ctrl_med[nearest] != 0
+        if not keep.all() and (dose, strain, mode) not in dropped:
+            dropped.add((dose, strain, mode))
+            print(f"[traits]   {dose}/{strain}: timepoint(s) with no usable control timepoint "
+                  f"within {tol_min:g} min were dropped from the {mode} time-course")
+        series = out.setdefault((strain, dose), {})
+        for i in np.flatnonzero(keep):
+            series.setdefault(float(ctrl_t[nearest[i]]), []).append(
+                float(op(y[i], ctrl_med[nearest[i]])))
+    return out
+
+
+def plot_control_normalized_timecourse(series: dict, wells: list[tuple], metric: str, mode: str,
+                                       output_dir: str = None, show: bool = False) -> None:
+    """One panel per strain: median (bars = quartiles across wells) of the
+    control-normalized activity vs elapsed time, one line per dose. The
+    control line sits at the reference level and its bars show the baseline
+    variability.
+    """
+    _, ref, ylabel, tag, legend_loc = NORMALIZATIONS[mode]
+    strains = sorted({s for s, _ in series})
+    doses = list(dict.fromkeys(w[0] for w in wells))
+    dose_mM = {w[0]: w[1] for w in wells}
+
+    ncols = min(4, len(strains))
+    nrows = -(-len(strains) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.5 * ncols, 3.6 * nrows),
+                             sharex=True, sharey=True, squeeze=False)
+    cmap = plt.get_cmap("tab10")
+
+    for ax, strain in zip(axes.flat, strains):
+        for idx, dose in enumerate(doses):
+            by_time = series.get((strain, dose))
+            if not by_time:
+                continue
+            times = sorted(by_time)
+            med = np.array([np.median(by_time[tt]) for tt in times])
+            q25 = np.array([np.percentile(by_time[tt], 25) for tt in times])
+            q75 = np.array([np.percentile(by_time[tt], 75) for tt in times])
+            ax.errorbar(times, med, yerr=[med - q25, q75 - med], color=cmap(idx % cmap.N),
+                        marker="o", markersize=4, linewidth=1.6, capsize=3, elinewidth=1.0,
+                        label=format_dose_label(dose_mM[dose]))
+        ax.axhline(ref, color="black", linewidth=0.9, alpha=0.7, zorder=1)
+        ax.set_title(strain, fontsize=11)
+        ax.grid(alpha=0.3)
+    for ax in axes.flat[len(strains):]:
+        ax.set_visible(False)
+
+    for ax in axes[-1]:
+        ax.set_xlabel("Elapsed time (min)")
+    for ax in axes[:, 0]:
+        ax.set_ylabel(ylabel.format(metric=metric))
+    axes.flat[0].legend(title="Dose", loc=legend_loc, fontsize=8)
+    plt.tight_layout()
+
+    if output_dir:
+        save_path = os.path.join(output_dir, f"curve_traits_{metric}_timecourse_{tag}.png")
+        fig.savefig(save_path, dpi=300)
+        print(f"[traits] Saved: {save_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_control_normalized_by_dose(series: dict, wells: list[tuple], metric: str, mode: str,
+                                    output_dir: str = None, show: bool = False) -> None:
+    """One figure per non-control dose with every strain overlaid: median
+    control-normalized activity vs elapsed time, one line per strain.
+    """
+    _, ref, ylabel, tag, _ = NORMALIZATIONS[mode]
+    strains = sorted({s for s, _ in series})
+    dose_mM = {w[0]: w[1] for w in wells}
+    cmap = plt.get_cmap("tab20")
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*", "<", ">"]
+
+    for dose, conc in dose_mM.items():
+        if conc == 0:
+            continue
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for i, strain in enumerate(strains):
+            by_time = series.get((strain, dose))
+            if not by_time:
+                continue
+            times = np.array(sorted(by_time))
+            med = np.array([np.median(by_time[tt]) for tt in times])
+            q25 = np.array([np.percentile(by_time[tt], 25) for tt in times])
+            q75 = np.array([np.percentile(by_time[tt], 75) for tt in times])
+            ax.errorbar(times, med, yerr=[med - q25, q75 - med],
+                        color=cmap(i % cmap.N), marker=markers[i % len(markers)],
+                        markersize=5, linewidth=1.6, capsize=2.5, elinewidth=1.0,
+                        label=strain)
+        ax.axhline(ref, color="black", linewidth=0.9, alpha=0.7, zorder=1)
+        ax.set_xlabel("Elapsed time (min)", fontsize=11)
+        ax.set_ylabel(ylabel.format(metric=metric), fontsize=11)
+        ax.set_title(f"{format_dose_label(conc)} — median ± quartiles across wells")
+        ax.grid(alpha=0.3)
+        ax.legend(title="Strain", loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=9)
+        plt.tight_layout()
+
+        if output_dir:
+            save_path = os.path.join(output_dir,
+                                     f"curve_traits_{metric}_timecourse_{tag}_all_strains_{dose}.png")
+            fig.savefig(save_path, dpi=300)
+            print(f"[traits] Saved: {save_path}")
+
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Quantitative traits from activity time-courses.",
@@ -245,6 +415,11 @@ def main():
                              "of --input_dir.")
     parser.add_argument("--no_plot", action="store_true",
                         help="Skip the AUC summary figure.")
+    parser.add_argument("--no_timecourse_plot", action="store_true",
+                        help="Skip the control-normalized (delta and ratio) activity time-course figures.")
+    parser.add_argument("--time_tol_min", type=float, default=5.0,
+                        help="Max difference (min) between a well's timepoint and the control "
+                             "timepoint it is matched to in the control-normalized time-course.")
     parser.add_argument("--show", action="store_true",
                         help="Pop up the figure interactively as well as saving it.")
     args = parser.parse_args()
@@ -257,8 +432,8 @@ def main():
 
     rows = []
     init_spans, final_spans = [], []
-    for dose, conc, strain, well, t, y in iter_wells(
-            args.input_dir, args.doses, args.dose_mM, args.metric):
+    wells = list(iter_wells(args.input_dir, args.doses, args.dose_mM, args.metric))
+    for dose, conc, strain, well, t, y in wells:
         auc = compute_auc(t, y)
         A0 = float(y[0])
         init_spans.append(t[min(args.slope_points, len(t)) - 1] - t[0])
@@ -301,6 +476,14 @@ def main():
                          None,
                          f"curve_traits_{args.metric}_slope_final.png",
                          output_dir=output_dir, show=args.show)
+
+    if not args.no_timecourse_plot:
+        for mode in NORMALIZATIONS:
+            series = control_normalized_timecourses(wells, args.time_tol_min, mode)
+            plot_control_normalized_timecourse(series, wells, args.metric, mode,
+                                               output_dir=output_dir, show=args.show)
+            plot_control_normalized_by_dose(series, wells, args.metric, mode,
+                                            output_dir=output_dir, show=args.show)
 
 
 if __name__ == "__main__":
