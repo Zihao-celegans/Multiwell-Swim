@@ -25,10 +25,23 @@ Traits implemented so far:
                 Reported as fitted, so a decaying well is negative
     slope_final same fit over the last --final_slope_points timepoints, so a
                 well that is recovering by the end of the run is positive
+    range_delta (first timepoint - min) of the well's control-subtracted
+                activity curve (see the control normalization below), in A.U.
+    range_ratio (first timepoint - min) of the well's control-divided activity
+                curve (fold of control, unitless)
+    t_p10_delta, t_p50_delta, t_p90_delta, t_p10_ratio, t_p50_ratio, t_p90_ratio
+                elapsed time (min) at which the linearly interpolated normalized
+                curve first reaches First - p * range or below, where First is
+                the curve's first timepoint and range = First - Min, for
+                p = 0.1, 0.5, 0.9 (--range_fracs)
 
 Alongside the per-well CSV it saves grouped box plots (median/quartiles across
 wells, with the individual wells overlaid) for every strain x dose
-combination: one figure for the AUC traits and one for the initial slope.
+combination: one figure for the AUC traits, one for the initial slope, one for
+the final slope, one each for range_delta and range_ratio, and one per
+normalization with a panel per --range_fracs value for the t_p<N> traits.
+The plots of the post-normalization traits (range and t_p<N>) leave out the
+control (0 mM) dose; the CSV still lists every well.
 
 Separately from the traits, it also plots the control-normalized activity
 time-course: each well's activity at every timepoint is normalized to the
@@ -41,7 +54,8 @@ Each is shown per strain as median +/- quartiles across wells, one line per
 dose. For each non-control dose it also saves a figure with all strains
 overlaid (curve_traits_<metric>_timecourse_<delta|ratio>_all_strains_<dose>.png,
 median +/- quartiles). Dose sessions are matched by nearest elapsed time within
---time_tol_min. The traits themselves are still computed on the raw activity.
+--time_tol_min. All traits except range_delta / range_ratio are computed on the
+raw activity; those two use each well's own control-normalized curve.
 
 Usage:
     python curve_traits.py --input_dir "E:\\MultiWell_swim\\08292026_CeDiv_Leva_test01"
@@ -154,14 +168,20 @@ def format_dose_label(dose_mM: float) -> str:
 
 
 def plot_trait_boxes(rows: list[dict], panels: list[tuple], title: str, filename: str,
-                     output_dir: str = None, show: bool = False) -> None:
+                     output_dir: str = None, show: bool = False,
+                     skip_control: bool = False) -> None:
     """Grouped box plots of the given (trait, ylabel) panels, one box per
     strain x dose, with the individual wells overlaid so unequal replicate
-    counts stay visible.
+    counts stay visible. skip_control drops the 0 mM dose from the plot; the
+    remaining doses keep the colors they have in the plots that include it.
     """
-    strains = sorted({r["strain"] for r in rows})
-    doses = list(dict.fromkeys(r["dose"] for r in rows))
+    all_doses = list(dict.fromkeys(r["dose"] for r in rows))
     dose_mM = {r["dose"]: r["dose_mM"] for r in rows}
+    if skip_control:
+        rows = [r for r in rows if r["dose_mM"] != 0]
+    strains = sorted({r["strain"] for r in rows})
+    doses = [d for d in all_doses if not (skip_control and dose_mM[d] == 0)]
+    color_idx = {d: all_doses.index(d) for d in doses}
 
     grouped: dict[tuple, list[dict]] = {}
     for row in rows:
@@ -178,7 +198,7 @@ def plot_trait_boxes(rows: list[dict], panels: list[tuple], title: str, filename
     for ax, (trait, ylabel) in zip(axes, panels):
         for idx, dose in enumerate(doses):
             offset = (idx - (len(doses) - 1) / 2) * width
-            color = cmap(idx % cmap.N)
+            color = cmap(color_idx[dose] % cmap.N)
             data, positions = [], []
             for i, strain in enumerate(strains):
                 vals = np.array([r[trait] for r in grouped.get((strain, dose), [])], dtype=float)
@@ -211,9 +231,9 @@ def plot_trait_boxes(rows: list[dict], panels: list[tuple], title: str, filename
         if ax.get_ylim()[0] < 0 < ax.get_ylim()[1]:
             ax.axhline(0, color="black", linewidth=0.9, alpha=0.7, zorder=1)
 
-    axes[0].legend(handles=[Patch(facecolor=cmap(i % cmap.N), alpha=0.75, edgecolor="black",
-                                  label=format_dose_label(dose_mM[d]))
-                            for i, d in enumerate(doses)],
+    axes[0].legend(handles=[Patch(facecolor=cmap(color_idx[d] % cmap.N), alpha=0.75,
+                                  edgecolor="black", label=format_dose_label(dose_mM[d]))
+                            for d in doses],
                    title="Dose", loc="best", fontsize=9)
     if title:
         axes[0].set_title(title)
@@ -240,8 +260,9 @@ NORMALIZATIONS = {
 }
 
 
-def control_normalized_timecourses(wells: list[tuple], tol_min: float,
-                                   mode: str) -> dict[tuple, dict[float, list[float]]]:
+def control_normalized_timecourses(wells: list[tuple], tol_min: float, mode: str
+                                   ) -> tuple[dict[tuple, dict[float, list[float]]],
+                                              dict[tuple, list[float]]]:
     """Each well's activity normalized to the median of the same strain's
     control (0 mM) wells at the same timepoint: mode "delta" subtracts it (net
     drug effect), mode "ratio" divides by it (fold of control).
@@ -249,8 +270,10 @@ def control_normalized_timecourses(wells: list[tuple], tol_min: float,
     Each dose is its own session, so a well's elapsed times are matched to the
     nearest control timepoint within tol_min (unmatched points are dropped, as
     are points whose control median is 0 in ratio mode).
-    Returns (strain, dose) -> control elapsed time -> [per-well normalized
-    activity], so wells from different sessions share one x value per timepoint.
+    Returns two dicts: (strain, dose) -> control elapsed time -> [per-well
+    normalized activity], so wells from different sessions share one x value
+    per timepoint; and (dose, strain, well) -> that well's normalized values in
+    time order, for the per-well range traits.
     """
     op = NORMALIZATIONS[mode][0]
     pooled: dict[str, dict[float, list[float]]] = {}
@@ -265,6 +288,7 @@ def control_normalized_timecourses(wells: list[tuple], tol_min: float,
             for s, d in pooled.items()}
 
     out: dict[tuple, dict[float, list[float]]] = {}
+    per_well: dict[tuple, list[tuple[float, float]]] = {}
     dropped = set()
     for dose, conc, strain, well, t, y in wells:
         if strain not in ctrl:
@@ -283,10 +307,40 @@ def control_normalized_timecourses(wells: list[tuple], tol_min: float,
             print(f"[traits]   {dose}/{strain}: timepoint(s) with no usable control timepoint "
                   f"within {tol_min:g} min were dropped from the {mode} time-course")
         series = out.setdefault((strain, dose), {})
+        values = per_well.setdefault((dose, strain, well), [])
         for i in np.flatnonzero(keep):
-            series.setdefault(float(ctrl_t[nearest[i]]), []).append(
-                float(op(y[i], ctrl_med[nearest[i]])))
-    return out
+            norm = float(op(y[i], ctrl_med[nearest[i]]))
+            series.setdefault(float(ctrl_t[nearest[i]]), []).append(norm)
+            values.append((float(t[i]), norm))
+    return out, per_well
+
+
+def compute_range(curve: list[tuple[float, float]]) -> float:
+    """First timepoint - min of a well's normalized curve (NaN if fewer than 2 points)."""
+    if len(curve) < 2:
+        return float("nan")
+    v = [val for _, val in curve]
+    return float(v[0] - np.min(v))
+
+
+def compute_time_to_fraction(curve: list[tuple[float, float]], p: float) -> float:
+    """Elapsed time (min) at which the linearly interpolated curve first
+    reaches First - p * (First - Min) or below, where First is the value at the
+    well's first timepoint: that timepoint if it already qualifies (range 0),
+    otherwise the interpolated crossing within the first segment that goes
+    from above the level to at or below it. NaN if the curve has fewer than
+    2 points.
+    """
+    if len(curve) < 2:
+        return float("nan")
+    times = np.array([tt for tt, _ in curve])
+    v = np.array([val for _, val in curve])
+    threshold = v[0] - p * (v[0] - v.min())
+    hit = int(np.flatnonzero(v <= threshold)[0])
+    if hit == 0:
+        return float(times[0])
+    frac = (v[hit - 1] - threshold) / (v[hit - 1] - v[hit])
+    return float(times[hit - 1] + frac * (times[hit] - times[hit - 1]))
 
 
 def plot_control_normalized_timecourse(series: dict, wells: list[tuple], metric: str, mode: str,
@@ -410,6 +464,10 @@ def main():
                         help="Number of leading timepoints used for the slope_init line fit.")
     parser.add_argument("--final_slope_points", type=int, default=5,
                         help="Number of trailing timepoints used for the slope_final line fit.")
+    parser.add_argument("--range_fracs", nargs="+", type=float, default=[0.1, 0.5, 0.9],
+                        help="Fractions p of the (first timepoint - min) range for the "
+                             "t_p<N>_<delta|ratio> traits: first time the linearly interpolated "
+                             "normalized curve is at or below first - p * range.")
     parser.add_argument("--output_dir", default=None,
                         help="Directory for the trait CSV. Defaults to a 'traits' subfolder "
                              "of --input_dir.")
@@ -433,11 +491,23 @@ def main():
     rows = []
     init_spans, final_spans = [], []
     wells = list(iter_wells(args.input_dir, args.doses, args.dose_mM, args.metric))
+
+    # The per-well range traits need the control; without a control dose they are NaN.
+    normalized = {}
+    if any(w[1] == 0 for w in wells):
+        normalized = {mode: control_normalized_timecourses(wells, args.time_tol_min, mode)
+                      for mode in NORMALIZATIONS}
+    else:
+        print("[traits] No control (0 mM) dose: range_delta / range_ratio will be NaN.")
+
     for dose, conc, strain, well, t, y in wells:
         auc = compute_auc(t, y)
         A0 = float(y[0])
         init_spans.append(t[min(args.slope_points, len(t)) - 1] - t[0])
         final_spans.append(t[-1] - t[-min(args.final_slope_points, len(t))])
+        curves = {mode: normalized[mode][1].get((dose, strain, well), []) if mode in normalized else []
+                  for mode in NORMALIZATIONS}
+        ranges = {mode: compute_range(curve) for mode, curve in curves.items()}
         rows.append({
             "dose": dose,
             "dose_mM": conc,
@@ -451,6 +521,10 @@ def main():
             "auc_norm": compute_auc_norm(auc, A0),
             "slope_init": compute_slope_init(t, y, args.slope_points),
             "slope_final": compute_slope_final(t, y, args.final_slope_points),
+            "range_delta": ranges["delta"],
+            "range_ratio": ranges["ratio"],
+            **{f"t_p{p * 100:g}_{mode}": compute_time_to_fraction(curve, p)
+               for mode, curve in curves.items() for p in args.range_fracs},
         })
 
     output_dir = args.output_dir or os.path.join(args.input_dir, "traits")
@@ -476,10 +550,30 @@ def main():
                          None,
                          f"curve_traits_{args.metric}_slope_final.png",
                          output_dir=output_dir, show=args.show)
+        if normalized:
+            plot_trait_boxes(rows,
+                             [("range_delta", f"First - min of {args.metric} minus control (A.U.)")],
+                             None,
+                             f"curve_traits_{args.metric}_range_delta.png",
+                             output_dir=output_dir, show=args.show, skip_control=True)
+            plot_trait_boxes(rows,
+                             [("range_ratio", f"First - min of {args.metric} / control")],
+                             None,
+                             f"curve_traits_{args.metric}_range_ratio.png",
+                             output_dir=output_dir, show=args.show, skip_control=True)
+            for mode in NORMALIZATIONS:
+                plot_trait_boxes(rows,
+                                 [(f"t_p{p * 100:g}_{mode}",
+                                   f"Time to {args.metric} {mode} <= first - {p:g} x range (min)")
+                                  for p in args.range_fracs],
+                                 None,
+                                 f"curve_traits_{args.metric}_time_to_fraction_{mode}.png",
+                                 output_dir=output_dir, show=args.show, skip_control=True)
 
     if not args.no_timecourse_plot:
         for mode in NORMALIZATIONS:
-            series = control_normalized_timecourses(wells, args.time_tol_min, mode)
+            series = normalized[mode][0] if normalized else \
+                control_normalized_timecourses(wells, args.time_tol_min, mode)[0]
             plot_control_normalized_timecourse(series, wells, args.metric, mode,
                                                output_dir=output_dir, show=args.show)
             plot_control_normalized_by_dose(series, wells, args.metric, mode,
