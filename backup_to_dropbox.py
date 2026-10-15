@@ -24,6 +24,8 @@ Usage:
     #   D:\\MultiWell_swim to .../Data_Backup/<friendly name>
     #   later runs on the same drive reuse the saved name automatically.
 
+    python backup_to_dropbox.py --source "E:\MultiWell_swim"
+
     python backup_to_dropbox.py --dry_run
     # → prints what would be copied/updated/skipped without touching anything
 
