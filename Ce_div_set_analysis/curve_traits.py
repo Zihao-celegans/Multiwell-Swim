@@ -38,8 +38,11 @@ Traits implemented so far:
                 recovery slope: OLS straight-line fit of the normalized curve
                 over the timepoints from its minimum (inclusive) to the end of
                 the run, per minute (A.U./min for delta, 1/min for ratio).
-                Positive when the well recovers; NaN if the minimum is the
-                last timepoint
+                Positive when the well recovers. The fit window must span at
+                least --rec_min_window_min (default 120 min): if the minimum is
+                closer than that to the end of the run, the window starts at the
+                timepoint closest to that long before the last timepoint instead
+                (about the last 5 points at 30 min sampling)
     A0_delta, auc_delta, slope_init_delta, slope_final_delta,
     A0_ratio, auc_ratio, slope_init_ratio, slope_final_ratio
                 the A0, auc, slope_init and slope_final definitions above
@@ -361,17 +364,24 @@ def compute_time_to_fraction(curve: list[tuple[float, float]], p: float) -> floa
     return float(times[hit - 1] + frac * (times[hit] - times[hit - 1]))
 
 
-def compute_slope_recovery(curve: list[tuple[float, float]]) -> float:
+def compute_slope_recovery(curve: list[tuple[float, float]], min_window_min: float = 120.0) -> float:
     """OLS slope of a well's normalized curve over the timepoints from its
     minimum (inclusive) to the end of the run, per minute. Positive when the
-    well recovers after the minimum. NaN if fewer than 2 points remain (the
-    minimum is the last timepoint). If the minimum is tied, the first one is used.
+    well recovers after the minimum. If the minimum is tied, the first one is used.
+
+    The window must span at least min_window_min: when the minimum is closer
+    than that to the end of the run, the window starts earlier instead, at the
+    timepoint closest to min_window_min before the last one (about the last 5
+    points at 30 min sampling), so the slope never rests on 1-3 points. NaN if
+    the curve has fewer than 2 points.
     """
     if len(curve) < 2:
         return float("nan")
     times = np.array([tt for tt, _ in curve])
     v = np.array([val for _, val in curve])
     start = int(v.argmin())
+    if times[-1] - times[start] < min_window_min:
+        start = int(np.abs(times[:start + 1] - (times[-1] - min_window_min)).argmin())
     if len(v) - start < 2:
         return float("nan")
     return float(np.polyfit(times[start:], v[start:], 1)[0])
@@ -521,6 +531,10 @@ def main():
                         help="Fractions p of the (first timepoint - min) range for the "
                              "t_p<N>_<delta|ratio> traits: first time the linearly interpolated "
                              "normalized curve is at or below first - p * range.")
+    parser.add_argument("--rec_min_window_min", type=float, default=120.0,
+                        help="Minimum time span (min) of the slope_rec_<delta|ratio> fit window. "
+                             "If the curve minimum is closer than this to the end of the run, the "
+                             "window starts earlier so it covers about this long.")
     parser.add_argument("--output_dir", default=None,
                         help="Directory for the trait CSV. Defaults to a 'traits' subfolder "
                              "of --input_dir.")
@@ -576,8 +590,8 @@ def main():
             "slope_final": compute_slope_final(t, y, args.final_slope_points),
             "range_delta": ranges["delta"],
             "range_ratio": ranges["ratio"],
-            "slope_rec_delta": compute_slope_recovery(curves["delta"]),
-            "slope_rec_ratio": compute_slope_recovery(curves["ratio"]),
+            "slope_rec_delta": compute_slope_recovery(curves["delta"], args.rec_min_window_min),
+            "slope_rec_ratio": compute_slope_recovery(curves["ratio"], args.rec_min_window_min),
             **{f"t_p{p * 100:g}_{mode}": compute_time_to_fraction(curve, p)
                for mode, curve in curves.items() for p in args.range_fracs},
             **{name: value for mode, curve in curves.items()
