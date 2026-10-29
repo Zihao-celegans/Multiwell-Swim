@@ -3,8 +3,8 @@ library(tidyverse)
 
 # ---- edit these ----
 base <- "C:/Users/jl200/Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1"
-trials <- c(test01 = "08292026_CeDiv_Leva_test01", test02 = "10102026_CeDiv_Leva_test02")
-out_dir <- file.path(base, "Merged_CeDiv_Leva_test01_test02")
+trials <- c(test02 = "10102026_CeDiv_Leva_test02", test03 = "10212026_CeDiv_Leva_test03")
+out_dir <- file.path(base, "Merged_CeDiv_Leva_test02_test03")
 raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final")
 # Normalized to each strain's own control, so control wells carry no strain signal
 normalized_traits <- c("range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
