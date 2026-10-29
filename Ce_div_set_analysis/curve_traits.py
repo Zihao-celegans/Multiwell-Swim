@@ -40,14 +40,25 @@ Traits implemented so far:
                 the run, per minute (A.U./min for delta, 1/min for ratio).
                 Positive when the well recovers; NaN if the minimum is the
                 last timepoint
+    A0_delta, auc_delta, slope_init_delta, slope_final_delta,
+    A0_ratio, auc_ratio, slope_init_ratio, slope_final_ratio
+                the A0, auc, slope_init and slope_final definitions above
+                applied to the well's control-subtracted (delta) or
+                control-divided (ratio) activity curve instead of the raw
+                activity: A0_<mode> is the normalized value at the first
+                timepoint, auc_<mode> is the trapezoidal area under the
+                normalized curve, and the slopes use the same
+                --slope_points / --final_slope_points windows
 
 Alongside the per-well CSV it saves grouped box plots (median/quartiles across
 wells, with the individual wells overlaid) for every strain x dose
 combination: one figure for the AUC traits, one for the initial slope, one for
 the final slope, one each for range_delta, range_ratio, slope_rec_delta and
-slope_rec_ratio, and one per
+slope_rec_ratio, one each for the eight A0 / auc / slope_init / slope_final
+_delta and _ratio traits, and one per
 normalization with a panel per --range_fracs value for the t_p<N> traits.
-The plots of the post-normalization traits (range, slope_rec and t_p<N>) leave out the
+The plots of the post-normalization traits (range, slope_rec, the _delta / _ratio
+A0, auc and slopes, and t_p<N>) leave out the
 control (0 mM) dose; the CSV still lists every well.
 
 Separately from the traits, it also plots the control-normalized activity
@@ -366,6 +377,25 @@ def compute_slope_recovery(curve: list[tuple[float, float]]) -> float:
     return float(np.polyfit(times[start:], v[start:], 1)[0])
 
 
+def compute_normalized_traits(curve: list[tuple[float, float]], mode: str,
+                              slope_points: int, final_slope_points: int) -> dict:
+    """A0, auc, slope_init and slope_final of a well's control-normalized curve,
+    with the same definitions as the raw-activity traits and the _<mode> suffix.
+    All NaN if the curve has fewer than 2 points.
+    """
+    names = [f"{trait}_{mode}" for trait in ("A0", "auc", "slope_init", "slope_final")]
+    if len(curve) < 2:
+        return {name: float("nan") for name in names}
+    t = np.array([tt for tt, _ in curve])
+    v = np.array([val for _, val in curve])
+    return dict(zip(names, [
+        float(v[0]),
+        compute_auc(t, v),
+        compute_slope_init(t, v, slope_points),
+        compute_slope_final(t, v, final_slope_points),
+    ]))
+
+
 def plot_control_normalized_timecourse(series: dict, wells: list[tuple], metric: str, mode: str,
                                        output_dir: str = None, show: bool = False) -> None:
     """One panel per strain: median (bars = quartiles across wells) of the
@@ -550,6 +580,9 @@ def main():
             "slope_rec_ratio": compute_slope_recovery(curves["ratio"]),
             **{f"t_p{p * 100:g}_{mode}": compute_time_to_fraction(curve, p)
                for mode, curve in curves.items() for p in args.range_fracs},
+            **{name: value for mode, curve in curves.items()
+               for name, value in compute_normalized_traits(
+                   curve, mode, args.slope_points, args.final_slope_points).items()},
         })
 
     output_dir = args.output_dir or os.path.join(args.input_dir, "traits")
@@ -596,6 +629,23 @@ def main():
                              None,
                              f"curve_traits_{args.metric}_slope_rec_ratio.png",
                              output_dir=output_dir, show=args.show, skip_control=True)
+            norm_trait_labels = {
+                "A0": {"delta": "{m} minus control at first timepoint (A.U.)",
+                       "ratio": "{m} / control at first timepoint"},
+                "auc": {"delta": "AUC of {m} minus control (A.U. x min)",
+                        "ratio": "AUC of {m} / control (min)"},
+                "slope_init": {"delta": "Initial slope of {m} minus control (A.U./min)",
+                               "ratio": "Initial slope of {m} / control (1/min)"},
+                "slope_final": {"delta": "Final slope of {m} minus control (A.U./min)",
+                                "ratio": "Final slope of {m} / control (1/min)"},
+            }
+            for trait, labels in norm_trait_labels.items():
+                for mode in NORMALIZATIONS:
+                    plot_trait_boxes(rows,
+                                     [(f"{trait}_{mode}", labels[mode].format(m=args.metric))],
+                                     None,
+                                     f"curve_traits_{args.metric}_{trait}_{mode}.png",
+                                     output_dir=output_dir, show=args.show, skip_control=True)
             for mode in NORMALIZATIONS:
                 plot_trait_boxes(rows,
                                  [(f"t_p{p * 100:g}_{mode}",

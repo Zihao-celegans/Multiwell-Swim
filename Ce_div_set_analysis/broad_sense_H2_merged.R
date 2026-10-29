@@ -9,7 +9,9 @@ raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final")
 # Normalized to each strain's own control, so control wells carry no strain signal
 normalized_traits <- c("range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
                        "t_p10_delta", "t_p50_delta", "t_p90_delta",
-                       "t_p10_ratio", "t_p50_ratio", "t_p90_ratio")
+                       "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
+                       "A0_delta", "auc_delta", "slope_init_delta", "slope_final_delta",
+                       "A0_ratio", "auc_ratio", "slope_init_ratio", "slope_final_ratio")
 trait_cols <- c(raw_traits, normalized_traits)
 nreps <- 100
 set.seed(1)
@@ -87,7 +89,15 @@ plot_data <- results %>%
   bind_rows(trial_results) %>%
   mutate(group = factor(group, levels = c("merged", names(trials))))
 
-trait_order <- c(raw_traits, normalized_traits)
+trait_order <- c("A0", "A0_delta", "A0_ratio",
+                 "auc", "auc_delta", "auc_ratio",
+                 "slope_init", "slope_init_delta", "slope_init_ratio",
+                 "slope_final", "slope_final_delta", "slope_final_ratio",
+                 "auc_norm", "range_delta", "range_ratio",
+                 "t_p10_delta", "t_p50_delta", "t_p90_delta",
+                 "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
+                 "slope_rec_delta", "slope_rec_ratio")
+stopifnot(setequal(trait_order, c(raw_traits, normalized_traits)))
 p <- plot_data %>%
   mutate(trait = factor(trait, levels = trait_order),
          dose_label = factor(dose_mM, levels = sort(unique(dose_mM)))) %>%
@@ -96,7 +106,7 @@ p <- plot_data %>%
   geom_errorbar(aes(ymin = lower_5, ymax = upper_95), width = 0.2,
                 position = position_dodge(width = 0.6)) +
   geom_point(size = 2, position = position_dodge(width = 0.6)) +
-  facet_wrap(~ trait, ncol = 5) +
+  facet_wrap(~ trait, ncol = 3) +
   coord_cartesian(ylim = c(0, 1)) +
   labs(title = "Broad-sense heritability (H2)",
        x = "Dose (mM)", y = "H2", colour = "Data") +
@@ -104,5 +114,5 @@ p <- plot_data %>%
   theme(strip.text = element_text(size = 8), legend.position = "bottom")
 png_path <- file.path(out_dir, "curve_traits_ActValS_merged_broad_sense_H2.png")
 unlink(png_path)  # agg fails to overwrite an existing PNG in this synced folder
-ggsave(png_path, p, width = 12, height = 7.5, dpi = 200)
+ggsave(png_path, p, width = 11, height = 14, dpi = 200)
 message("Saved to: ", out_dir)

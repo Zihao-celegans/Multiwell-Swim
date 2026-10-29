@@ -8,7 +8,9 @@ raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final")
 # Normalized to each strain's own control, so control wells carry no strain signal
 normalized_traits <- c("range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
                        "t_p10_delta", "t_p50_delta", "t_p90_delta",
-                       "t_p10_ratio", "t_p50_ratio", "t_p90_ratio")
+                       "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
+                       "A0_delta", "auc_delta", "slope_init_delta", "slope_final_delta",
+                       "A0_ratio", "auc_ratio", "slope_init_ratio", "slope_final_ratio")
 trait_cols <- c(raw_traits, normalized_traits)
 nreps <- 100
 set.seed(1)
