@@ -105,6 +105,52 @@ def _interpolate_grid(ul, ur, ll, lr, radius: float,
     return roi_list
 
 
+def _add_crosshair(fig, ax, color="cyan", linewidth=0.8, alpha=0.9):
+    """Add horizontal + vertical lines that follow the cursor over `ax`.
+
+    Uses blitting (animated artists) so movement stays smooth on large frames.
+    Keep a reference to the returned list until the figure is closed.
+    """
+    vline = ax.axvline(0, color=color, linewidth=linewidth, alpha=alpha,
+                       animated=True, visible=False)
+    hline = ax.axhline(0, color=color, linewidth=linewidth, alpha=alpha,
+                       animated=True, visible=False)
+    state = {"bg": None}
+
+    def _on_draw(_event):
+        state["bg"] = fig.canvas.copy_from_bbox(fig.bbox)
+        ax.draw_artist(vline)
+        ax.draw_artist(hline)
+
+    def _on_move(event):
+        visible = event.inaxes is ax and event.xdata is not None
+        if not visible:
+            if vline.get_visible():
+                vline.set_visible(False)
+                hline.set_visible(False)
+                if state["bg"] is not None:
+                    fig.canvas.restore_region(state["bg"])
+                    fig.canvas.blit(fig.bbox)
+            return
+        vline.set_xdata([event.xdata, event.xdata])
+        hline.set_ydata([event.ydata, event.ydata])
+        vline.set_visible(True)
+        hline.set_visible(True)
+        if state["bg"] is None:
+            fig.canvas.draw_idle()
+            return
+        fig.canvas.restore_region(state["bg"])
+        ax.draw_artist(vline)
+        ax.draw_artist(hline)
+        fig.canvas.blit(fig.bbox)
+
+    cids = [
+        fig.canvas.mpl_connect("draw_event", _on_draw),
+        fig.canvas.mpl_connect("motion_notify_event", _on_move),
+    ]
+    return [vline, hline, state, cids, _on_draw, _on_move]
+
+
 def _draw_overlay(ax, roi_list: list, corner_pts=None) -> None:
     """Overlay ROI circles and markers on a matplotlib Axes.
 
@@ -173,6 +219,7 @@ def run_new_roi(frame: np.ndarray, num_row: int, num_col: int,
         )
         plt.tight_layout()
         fig.canvas.manager.set_window_title("ROI Detection — Corner Selection")
+        _crosshair = _add_crosshair(fig, ax)   # noqa: F841 (keeps callbacks alive)
 
         print("\n[ROI] Waiting for 4 corner-well clicks (UL → UR → LL → LR)…")
         pts = plt.ginput(4, timeout=-1)   # blocks until 4 clicks + Enter
