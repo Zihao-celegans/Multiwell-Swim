@@ -24,7 +24,7 @@ Usage:
     #   D:\\MultiWell_swim to .../Data_Backup/<friendly name>
     #   later runs on the same drive reuse the saved name automatically.
 
-    python backup_to_dropbox.py --source "E:\MultiWell_swim"
+    python backup_to_dropbox.py --source "E:\\MultiWell_swim"
 
     python backup_to_dropbox.py --dry_run
     # → prints what would be copied/updated/skipped without touching anything
@@ -50,7 +50,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SOURCE = r"D:\MultiWell_swim"
-DEFAULT_DEST = r"C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Data_Backup"
+DEST_SUBPATH = os.path.join("JHU_2026_spring", "Multiwell_swim", "Data_Backup")
 DEFAULT_VIDEO_EXTS = ".avi,.mp4,.mov,.mkv,.wmv"
 DRIVE_NAME_MAP_PATH = os.path.join(SCRIPT_DIR, ".drive_names.json")
 
@@ -79,6 +79,32 @@ def _get_volume_info(path: str) -> tuple:
     except (AttributeError, OSError):
         pass
     return (fallback, None)
+
+
+def _find_dropbox_root() -> str:
+    """Locate this computer's Dropbox folder (differs per user/machine).
+
+    Reads Dropbox's own info.json first, then falls back to ~/Dropbox.
+    """
+    for env_var in ("APPDATA", "LOCALAPPDATA"):
+        base = os.environ.get(env_var)
+        if not base:
+            continue
+        info_path = os.path.join(base, "Dropbox", "info.json")
+        try:
+            with open(info_path, "r", encoding="utf-8") as fh:
+                info = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        for account in ("personal", "business"):
+            path = info.get(account, {}).get("path")
+            if path and os.path.isdir(path):
+                return path
+    return os.path.join(os.path.expanduser("~"), "Dropbox")
+
+
+def _default_dest() -> str:
+    return os.path.join(_find_dropbox_root(), DEST_SUBPATH)
 
 
 def _sanitize_folder_name(name: str) -> str:
@@ -201,8 +227,9 @@ def main():
     )
     parser.add_argument("--source", default=DEFAULT_SOURCE,
                         help="Root folder to back up from.")
-    parser.add_argument("--dest", default=DEFAULT_DEST,
-                        help="Root folder to back up to (Dropbox folder). Each drive "
+    parser.add_argument("--dest",     default=_default_dest(),
+                            help="Root folder to back up to (Dropbox folder; auto-detected "
+                                 "for the current user). Each drive "
                              "gets its own subfolder under this path (see --drive_name).")
     parser.add_argument("--drive_name", default=None,
                         help="Name of the subfolder under --dest for this drive's backup. "
