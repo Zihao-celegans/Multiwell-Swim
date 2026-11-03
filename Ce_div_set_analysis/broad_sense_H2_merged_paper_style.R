@@ -9,10 +9,21 @@ library(tidyverse)
 #             2. lmer(residual ~ 1 + (1|strain)); bootstrap within strain
 # Both run per dose and trait on the same wells (control dose excluded for the control-normalized traits).
 
-# ---- edit these ----
+# Usage: Rscript broad_sense_H2_merged_paper_style.R <output folder name> <trial folder> <trial folder> [<trial folder> ...]
+# With no arguments it uses test02 + test03 and Merged_CeDiv_Leva_test02_test03.
+# Needs the matching broad_sense_H2_merged.R output (reads its all_strains rows).
+args <- commandArgs(trailingOnly = TRUE)
 base <- "C:/Users/jl200/Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1"
-trials <- c(test02 = "10102026_CeDiv_Leva_test02", test03 = "10212026_CeDiv_Leva_test03")
-out_dir <- file.path(base, "Merged_CeDiv_Leva_test02_test03")
+if (length(args) >= 3) {
+  out_name <- args[1]
+  trial_folders <- args[-1]
+} else {
+  out_name <- "Merged_CeDiv_Leva_test02_test03"
+  trial_folders <- c("10102026_CeDiv_Leva_test02", "10212026_CeDiv_Leva_test03")
+}
+# Trial label = the "testNN" suffix of the folder name
+trials <- setNames(trial_folders, sub(".*_(test[0-9]+)$", "\\1", trial_folders))
+out_dir <- file.path(base, out_name)
 raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final")
 normalized_traits <- c("range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
                        "t_p10_delta", "t_p50_delta", "t_p90_delta",
