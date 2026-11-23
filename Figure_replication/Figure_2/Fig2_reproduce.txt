@@ -1,0 +1,87 @@
+Figure 2 - motion-encoded well gallery (LEV dose x time)
+=========================================================
+
+Output
+------
+Fig2A.svg                  3.5 in wide x 3.08 in tall (height fitted to content),
+                           all text Arial 10 pt (live <text>, Arial must be installed to view).
+Fig2A.png                  same figure and layout, 300 dpi (1050 x ~924 px).
+Script: generate_Fig2.py (this folder)
+
+
+Command used (run from this folder, Windows PowerShell)
+-------------------------------------------------------
+python generate_Fig2.py --data_dir "D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02" --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignments\Well_assignment_0728\dose_layout.csv" --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --wells C10 E9 D11 E6 --times 0 90 240 480 --dt 3 --thresh 10 --sat 40 --gain 1 --view merged --size 3.5 --margins 0.36 0.5 0.1 0.34 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.25 --dpi 300 --also_png --output Fig2A.svg
+
+All options are written out explicitly so the result does not depend on the
+script's defaults. Run time is a few minutes (frames are read from ~2.9 GB .avi files).
+
+
+Environment
+-----------
+Python 3.8.10, matplotlib 3.7.5, numpy 1.24.4, opencv 5.1.0 (cv2), Windows.
+Font: Arial must be installed (matplotlib falls back to another font otherwise).
+
+
+Data
+----
+Raw videos : D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02  (17 x .avi, 5 fps, 5472 x 3648)
+Well layout: ...\Well_assignments\Well_assignment_0728\dose_layout.csv  (condition,well)
+ROI file   : <video>_output\<video>_roi_info.json (well centers/radius, full-resolution px), used for cropping
+Results    : <video>_output\<video>_results.json (ActValS per well), used only for the well selection below
+
+Time points (--times, minutes from the first video's timestamp) use the nearest video:
+  0 min   -> video0000 09-54-31 (0.0 min)
+  90 min  -> video0003 11-24-44 (90.2 min)
+  240 min -> video0008 13-54-36 (240.1 min)
+  480 min -> video0016 17-55-12 (480.7 min)
+
+
+Well selection
+--------------
+Rule: for each dose, the well whose ActValS at 90 min (video0003) is closest to the mean
+ActValS of all wells at that dose (script default: --select mean-activity --select_time 90).
+
+  Dose        mean ActValS   rule's pick   used (--wells)
+  0 mM          4259.0       C10           C10
+  0.0125 mM     3700.5       E9            E9
+  0.025 mM      1155.8       D11           D11
+  0.1 mM          24.7       F5 (30.9)     E6 (17.3)
+
+0.1 mM: F5 was replaced by the next-closest well, E6, because F5 has a crack (visible in all
+panels). The script does not exclude wells automatically, so E6 is passed explicitly with
+--wells. Without --wells the script would pick F5 for 0.1 mM.
+
+
+Image processing (per panel)
+----------------------------
+1. Two frames from the same video: frame 0 (T0) and T0 + dt (dt = 3 s = 15 frames at 5 fps).
+2. Both frames converted to grayscale by averaging the color channels, cropped to a square
+   around the well (half-width = ROI radius, --pad 1.0). No other filtering or resampling
+   (images drawn with nearest-neighbour interpolation).
+3. Intensity-change map = T0 - T1 (gray levels). |change| < 10 (--thresh) is set to 0 (noise removal).
+4. Color coding: black at 0; linear ramp to pure red (T0 brighter) / pure blue (later frame
+   brighter) at |change| = 40 (--sat); fully saturated beyond that.
+5. Merge: the map's brightness is the per-pixel opacity over the raw base image, where the
+   base is the mean of the two frames (--gain 1, no brightness scaling). Unchanged pixels
+   therefore show the raw gray image.
+6. Color bar: symmetric and shared by all 16 panels, spanning +/- the largest |change| in
+   the figure (-84 to 84; difference range across panels was -84 to 79). Black region = change
+   below the noise threshold; colors are saturated from 40 to the ends.
+
+Caption note: the color bar applies to the intensity-change map only; in the merged panels
+unchanged pixels show the raw grayscale image rather than black.
+
+
+Parameters (all as passed above)
+--------------------------------
+--dt 3               seconds between T0 and T1
+--thresh 10          noise threshold (gray levels)
+--sat 40             saturation point (gray levels)
+--gain 1             base image brightness (1 = as acquired)
+--view merged        (map = difference map only, raw = single frame)
+--size 3.5           width in inches; height fitted to content
+--margins            left right top bottom gap (inches)
+--bar_offset         grid -> color bar (inches)
+--axis_label_offset  grid left edge -> "LEV dose (mM)" label (inches)
+--axis_label_offset_bottom  grid bottom edge -> "Time (min)" label (inches)
