@@ -1,0 +1,17 @@
+dose,well,time_min,dt_s,file_T0,file_T1
+0 mM,C10,0,3,0mM_C10_0min_T0.png,0mM_C10_0min_T1.png
+0 mM,C10,90,3,0mM_C10_90min_T0.png,0mM_C10_90min_T1.png
+0 mM,C10,240,3,0mM_C10_240min_T0.png,0mM_C10_240min_T1.png
+0 mM,C10,480,3,0mM_C10_480min_T0.png,0mM_C10_480min_T1.png
+0.0125 mM,E9,0,3,0.0125mM_E9_0min_T0.png,0.0125mM_E9_0min_T1.png
+0.0125 mM,E9,90,3,0.0125mM_E9_90min_T0.png,0.0125mM_E9_90min_T1.png
+0.0125 mM,E9,240,3,0.0125mM_E9_240min_T0.png,0.0125mM_E9_240min_T1.png
+0.0125 mM,E9,480,3,0.0125mM_E9_480min_T0.png,0.0125mM_E9_480min_T1.png
+0.025 mM,D11,0,3,0.025mM_D11_0min_T0.png,0.025mM_D11_0min_T1.png
+0.025 mM,D11,90,3,0.025mM_D11_90min_T0.png,0.025mM_D11_90min_T1.png
+0.025 mM,D11,240,3,0.025mM_D11_240min_T0.png,0.025mM_D11_240min_T1.png
+0.025 mM,D11,480,3,0.025mM_D11_480min_T0.png,0.025mM_D11_480min_T1.png
+0.1 mM,E6,0,3,0.1mM_E6_0min_T0.png,0.1mM_E6_0min_T1.png
+0.1 mM,E6,90,3,0.1mM_E6_90min_T0.png,0.1mM_E6_90min_T1.png
+0.1 mM,E6,240,3,0.1mM_E6_240min_T0.png,0.1mM_E6_240min_T1.png
+0.1 mM,E6,480,3,0.1mM_E6_480min_T0.png,0.1mM_E6_480min_T1.png

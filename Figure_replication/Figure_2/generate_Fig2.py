@@ -12,6 +12,11 @@ Rows are doses, columns are timepoints. For each dose the well whose activity
 mean of all wells at that dose is shown. Alternatives: --select center (well
 closest to the plate center) or --wells to choose explicitly.
 
+The raw videos are large, so --export_frames saves the cropped frame pairs the
+figure needs as PNG files (data/Fig2A_frames/, with manifest.csv) and --frames
+redraws the figure from that folder alone, with no videos, layout file or ROI
+files (see Fig2_reproduce.txt).
+
 Each panel is built in two steps. (1) The intensity-change map (T0 - T1, where
 T1 = T0 + dt, default 3 s) is denoised by zeroing changes below +/-thresh, then
 color-coded: red where the T0 frame is brighter, blue where the later frame is
@@ -167,6 +172,98 @@ def merge_map(img_t0, img_t1, diff_rgb, gain: float):
     return np.clip(base * (1 - alpha) + diff_rgb, 0, 1)
 
 
+def load_grid_from_videos(args):
+    """Select wells and read the frame pairs from the raw videos.
+
+    Returns (doses, wells, times, grid), grid[row = dose][col = time] = (T0 crop, T1 crop).
+    """
+    layout = load_layout(args.layout)
+    videos = list_videos(args.data_dir)
+    with open(videos[0][2]) as fh:
+        roi0 = json.load(fh)
+    if args.wells:
+        wells = args.wells
+    elif args.select == "center":
+        wells = [closest_to_center(layout[d], roi0) for d in args.doses]
+    else:
+        sel_min, sel_avi, sel_roi = min(videos, key=lambda v: abs(v[0] - args.select_time))
+        sel_results = sel_roi.replace("_roi_info.json", "_results.json")
+        print(f"Well selection: {args.metric} at {args.select_time:g} min "
+              f"({os.path.basename(sel_avi)}, actual {sel_min:.1f} min)")
+        wells = []
+        for d in args.doses:
+            well, mean, value = closest_to_mean_activity(layout[d], sel_results, args.metric)
+            print(f"  {d}: mean {mean:.1f}, selected {well} ({value:.1f})")
+            wells.append(well)
+    if len(wells) != len(args.doses):
+        raise SystemExit("--wells must have one well per dose")
+    for dose, well in zip(args.doses, wells):
+        if well not in layout[dose]:
+            raise SystemExit(f"Well {well} is not assigned to {dose}; options: {layout[dose]}")
+        print(f"{dose}: well {well}")
+
+    grid = []
+    for dose, well in zip(args.doses, wells):
+        row = []
+        for t in args.times:
+            elapsed, avi, roi = min(videos, key=lambda v: abs(v[0] - t))
+            print(f"{dose} / {well}: {t:g} min -> {os.path.basename(avi)} (actual {elapsed:.1f} min)")
+            cap = cv2.VideoCapture(avi)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            cap.release()
+            frame_t1 = args.frame + int(round(args.dt * fps))
+            row.append(crop_well_frames(avi, roi, well, [args.frame, frame_t1], args.pad))
+        grid.append(row)
+    return list(args.doses), list(wells), list(args.times), grid
+
+
+def save_frames(folder: str, doses, wells, times, grid, dt: float) -> None:
+    """Save the cropped frame pairs (everything the figure needs) as PNG files.
+
+    One lossless 8-bit grayscale PNG per frame ('<dose>_<well>_<time>min_T0.png' and
+    '_T1.png') plus manifest.csv listing the panel order. Crops are exact 8-bit
+    values (the grayscale conversion of 8-bit video gives integers), so figures
+    drawn from these files are identical to figures drawn from the videos.
+    """
+    os.makedirs(folder, exist_ok=True)
+    rows = []
+    for dose, well, row in zip(doses, wells, grid):
+        for t, pair in zip(times, row):
+            names = []
+            for tag, img in zip(("T0", "T1"), pair):
+                if not np.array_equal(img, np.round(img)) or img.min() < 0 or img.max() > 255:
+                    raise ValueError("Crops are not 8-bit integer values; refusing to store lossy images")
+                name = f"{dose.replace(' ', '')}_{well}_{t:g}min_{tag}.png"
+                cv2.imwrite(os.path.join(folder, name), img.astype(np.uint8))
+                names.append(name)
+            rows.append([dose, well, f"{t:g}", f"{dt:g}", *names])
+    with open(os.path.join(folder, "manifest.csv"), "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["dose", "well", "time_min", "dt_s", "file_T0", "file_T1"])
+        writer.writerows(rows)
+    size = sum(os.path.getsize(os.path.join(folder, f)) for f in os.listdir(folder)) / 1024
+    print(f"Saved {len(rows) * 2} frames + manifest.csv to {folder} ({size:.0f} KB)")
+
+
+def load_frames(folder: str):
+    """Inverse of save_frames: returns (doses, wells, times, dt, grid)."""
+    with open(os.path.join(folder, "manifest.csv"), newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    doses, wells, times = [], [], []
+    for r in rows:  # first appearance fixes the row/column order
+        if r["dose"] not in doses:
+            doses.append(r["dose"])
+            wells.append(r["well"])
+        if float(r["time_min"]) not in times:
+            times.append(float(r["time_min"]))
+    dt = float(rows[0]["dt_s"])
+    by_panel = {(r["dose"], float(r["time_min"])): r for r in rows}
+    read = lambda name: cv2.imread(os.path.join(folder, name), cv2.IMREAD_UNCHANGED).astype(np.float32)
+    grid = [[(read(by_panel[(d, t)]["file_T0"]), read(by_panel[(d, t)]["file_T1"])) for t in times]
+            for d in doses]
+    return doses, wells, times, dt, grid
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data_dir", default=DEFAULT_DATA_DIR)
@@ -206,6 +303,12 @@ def main():
                    help="Inches from the panel grid's left edge to the 'Dose' axis label")
     p.add_argument("--axis_label_offset_bottom", type=float, default=0.25,
                    help="Inches from the panel grid's bottom edge to the 'Time' axis label")
+    p.add_argument("--frames", default=None, metavar="DIR",
+                   help="Draw the figure from the PNG frames in DIR (written by --export_frames) instead of the "
+                        "raw videos; doses, wells and times come from DIR/manifest.csv (no videos/layout needed)")
+    p.add_argument("--export_frames", default=None, metavar="DIR",
+                   help="After reading the videos, save the cropped frame pairs as PNG files + manifest.csv "
+                        "in DIR for use with --frames")
     p.add_argument("--dpi", type=int, default=300, help="Resolution for raster output formats")
     p.add_argument("--also_png", action="store_true",
                    help="Also save a PNG next to --output (same name, .png, at --dpi)")
@@ -217,45 +320,19 @@ def main():
                          "axes.labelsize": 10, "xtick.labelsize": 10, "ytick.labelsize": 10,
                          "svg.fonttype": "none"})
 
-    layout = load_layout(args.layout)
-    videos = list_videos(args.data_dir)
-    with open(videos[0][2]) as fh:
-        roi0 = json.load(fh)
-    if args.wells:
-        wells = args.wells
-    elif args.select == "center":
-        wells = [closest_to_center(layout[d], roi0) for d in args.doses]
+    if args.frames:
+        doses, wells, times, cache_dt, grid = load_frames(args.frames)
+        if abs(cache_dt - args.dt) > 1e-9:
+            raise SystemExit(f"--dt {args.dt:g} differs from the cached frame pairs (dt = {cache_dt:g} s); "
+                             f"re-export from the videos to change it")
+        print(f"Loaded cached frames from {args.frames}")
+        for dose, well in zip(doses, wells):
+            print(f"{dose}: well {well}")
     else:
-        sel_min, sel_avi, sel_roi = min(videos, key=lambda v: abs(v[0] - args.select_time))
-        sel_results = sel_roi.replace("_roi_info.json", "_results.json")
-        print(f"Well selection: {args.metric} at {args.select_time:g} min "
-              f"({os.path.basename(sel_avi)}, actual {sel_min:.1f} min)")
-        wells = []
-        for d in args.doses:
-            well, mean, value = closest_to_mean_activity(layout[d], sel_results, args.metric)
-            print(f"  {d}: mean {mean:.1f}, selected {well} ({value:.1f})")
-            wells.append(well)
-    if len(wells) != len(args.doses):
-        raise SystemExit("--wells must have one well per dose")
-    for dose, well in zip(args.doses, wells):
-        if well not in layout[dose]:
-            raise SystemExit(f"Well {well} is not assigned to {dose}; options: {layout[dose]}")
-        print(f"{dose}: well {well}")
-
-    # grid[row = dose][col = time] = (frame at T0, frame at T1)
-    grid = []
-    for dose, well in zip(args.doses, wells):
-        row = []
-        for t in args.times:
-            elapsed, avi, roi = min(videos, key=lambda v: abs(v[0] - t))
-            print(f"{dose} / {well}: {t:g} min -> {os.path.basename(avi)} (actual {elapsed:.1f} min)")
-            cap = cv2.VideoCapture(avi)
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            cap.release()
-            frame_t1 = args.frame + int(round(args.dt * fps))
-            row.append(crop_well_frames(avi, roi, well, [args.frame, frame_t1], args.pad))
-        grid.append(row)
-
+        doses, wells, times, grid = load_grid_from_videos(args)
+        if args.export_frames:
+            save_frames(args.export_frames, doses, wells, times, grid, args.dt)
+    args.doses, args.times = doses, times
     # Step 1: denoised intensity-change maps, one shared scale for all panels.
     # Changes below +/-thresh are zeroed (black); colors saturate at +/-sat. The
     # color bar spans +/-(largest |change|), so the saturated plateaus beyond +/-sat are visible.

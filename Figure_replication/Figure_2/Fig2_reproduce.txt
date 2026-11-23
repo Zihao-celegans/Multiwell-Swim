@@ -6,15 +6,34 @@ Output
 Fig2A.svg                  3.5 in wide x 3.08 in tall (height fitted to content),
                            all text Arial 10 pt (live <text>, Arial must be installed to view).
 Fig2A.png                  same figure and layout, 300 dpi (1050 x ~924 px).
+data/Fig2A_frames/         the 32 cropped frames behind the figure (16 panels x T0/T1) as lossless 8-bit
+                           grayscale PNGs, named <dose>_<well>_<time>min_T0|T1.png, plus manifest.csv
+                           (panel order, wells, times, dt). ~2.2 MB. Lets the figure be redrawn without the
+                           raw videos (see "Reproducing without the videos").
 Script: generate_Fig2.py (this folder)
 
 
 Command used (run from this folder, Windows PowerShell)
 -------------------------------------------------------
-python generate_Fig2.py --data_dir "D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02" --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignments\Well_assignment_0728\dose_layout.csv" --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --wells C10 E9 D11 E6 --times 0 90 240 480 --dt 3 --thresh 10 --sat 40 --gain 1 --view merged --size 3.5 --margins 0.36 0.5 0.1 0.34 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.25 --dpi 300 --also_png --output Fig2A.svg
+python generate_Fig2.py --data_dir "D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02" --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignments\Well_assignment_0728\dose_layout.csv" --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --wells C10 E9 D11 E6 --times 0 90 240 480 --dt 3 --thresh 10 --sat 40 --gain 1 --view merged --size 3.5 --margins 0.36 0.5 0.1 0.34 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.25 --dpi 300 --also_png --export_frames data\Fig2A_frames --output Fig2A.svg
 
 All options are written out explicitly so the result does not depend on the
 script's defaults. Run time is a few minutes (frames are read from ~2.9 GB .avi files).
+--export_frames also writes the PNG frames used below.
+
+
+Reproducing without the videos (any computer)
+---------------------------------------------
+Needs only Python with numpy, matplotlib and opencv-python (cv2 is used to read the PNGs,
+no video is opened), plus this folder. data_dir / layout are not used.
+
+python generate_Fig2.py --frames data\Fig2A_frames --dt 3 --thresh 10 --sat 40 --gain 1 --view merged --size 3.5 --margins 0.36 0.5 0.1 0.34 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.25 --dpi 300 --also_png --output Fig2A.svg
+
+Doses, wells and time points come from data\Fig2A_frames\manifest.csv (printed on load).
+The frame pairs are for dt = 3 s, so --dt must be 3 (the script stops otherwise); the image
+settings (--thresh, --sat, --gain, --view, layout and font options) can still be changed.
+The PNG and SVG drawn from these frames were checked against the video-based ones: PNG
+pixels are identical and the SVG is identical apart from its date/ids.
 
 
 Environment
