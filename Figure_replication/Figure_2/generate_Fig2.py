@@ -294,14 +294,14 @@ def main():
                    help="Output path; the format follows the extension (.svg, .png, .pdf)")
     p.add_argument("--size", type=float, nargs="+", default=[3.5], metavar="INCHES",
                    help="Figure size in inches: 'W' (height fitted to the content, default) or 'W H'")
-    p.add_argument("--margins", type=float, nargs=5, default=[0.36, 0.5, 0.1, 0.34, 0.03],
+    p.add_argument("--margins", type=float, nargs=5, default=[0.36, 0.5, 0.1, 0.354, 0.03],
                    metavar=("LEFT", "RIGHT", "TOP", "BOTTOM", "GAP"),
                    help="Inches: figure margins (right holds the color bar, bottom the time axis) "
                         "and the gap between panels")
     p.add_argument("--bar_offset", type=float, default=0.05, help="Inches from the panel grid to the color bar")
     p.add_argument("--axis_label_offset", type=float, default=0.27,
                    help="Inches from the panel grid's left edge to the 'Dose' axis label")
-    p.add_argument("--axis_label_offset_bottom", type=float, default=0.25,
+    p.add_argument("--axis_label_offset_bottom", type=float, default=0.264,
                    help="Inches from the panel grid's bottom edge to the 'Time' axis label")
     p.add_argument("--frames", default=None, metavar="DIR",
                    help="Draw the figure from the PNG frames in DIR (written by --export_frames) instead of the "
@@ -378,7 +378,7 @@ def main():
                           interpolation="nearest")
             ax.axis("off")
             if i == nrow - 1:
-                ax.annotate(f"{t:g}", (0.5, 0), xytext=(0, -2), textcoords="offset points",
+                ax.annotate(f"{t:g}", (0.5, 0), xytext=(0, -3), textcoords="offset points",
                             xycoords="axes fraction", ha="center", va="top")
             if j == 0:
                 ax.text(-0.04, 0.5, dose.rsplit(" ", 1)[0], transform=ax.transAxes, rotation=90,
