@@ -5,7 +5,7 @@ elapsed time, measured from the first video's timestamp) and cropped to the well
 using the ROI info saved by the pipeline (full-resolution pixel coordinates).
 
 Example:
-    python generate_Fig2.py --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --times 0 90 240 480
+    python generate_Fig2A.py --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --times 0 90 240 480
 
 Rows are doses, columns are timepoints. For each dose the well whose activity
 (--metric, default ActValS) at --select_time (default 90 min) is closest to the
