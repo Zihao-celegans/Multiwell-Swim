@@ -292,8 +292,8 @@ def main():
     p.add_argument("--pad", type=float, default=1.0, help="Crop half-width as a multiple of the ROI radius")
     p.add_argument("--output", default=os.path.join(os.path.dirname(__file__), "Fig2_gallery.svg"),
                    help="Output path; the format follows the extension (.svg, .png, .pdf)")
-    p.add_argument("--size", type=float, nargs="+", default=[3.5], metavar="INCHES",
-                   help="Figure size in inches: 'W' (height fitted to the content, default) or 'W H'")
+    p.add_argument("--size", type=float, nargs="+",     default=[3.56, 3.147], metavar="INCHES",
+                       help="Figure size in inches: 'W H', or 'W' alone (height fitted to the content)")
     p.add_argument("--margins", type=float, nargs=5, default=[0.36, 0.5, 0.1, 0.354, 0.03],
                    metavar=("LEFT", "RIGHT", "TOP", "BOTTOM", "GAP"),
                    help="Inches: figure margins (right holds the color bar, bottom the time axis) "
