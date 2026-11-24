@@ -21,7 +21,7 @@ Each panel is built in two steps. (1) The intensity-change map is T0 - T1 (T1 = 
 default 3 s), normalized by default as (T0 - T1) / (T0 + T1), from -1 to 1 (as in
 activity_analysis.py); --diff_method absolute gives the plain gray-level difference instead.
 It is denoised by zeroing changes below +/-thresh (default 0.05; 10 gray levels for absolute),
-then color-coded, saturating at +/-sat (default 0.5; 40 for absolute): red where the T0 frame
+then color-coded, saturating at +/-sat (default 0.4; 40 for absolute): red where the T0 frame
 is brighter, blue where the later frame is brighter, black for no (or sub-noise) change.
 (2) The map is blended into the raw image, using the map's brightness as opacity, so
 no-change pixels show the raw grayscale. The color bar applies to the intensity-change map
@@ -296,7 +296,7 @@ def main():
                         "absolute: T0 - T1 in gray levels")
     p.add_argument("--sat", type=float, default=None,
                    help="Change at which the color saturates to pure red/blue "
-                        "(gray levels, default 40; normalized: default 0.5)")
+                        "(gray levels, default 40; normalized: default 0.4)")
     p.add_argument("--thresh", type=float, default=None,
                    help="Noise level: |change| below this is set to 0 (black) in the difference map "
                         "(gray levels, default 10; normalized: default 0.05)")
@@ -352,7 +352,7 @@ def main():
     if args.thresh is None:
         args.thresh = 0.05 if normalized else 10
     if args.sat is None:
-        args.sat = 0.5 if normalized else 40
+        args.sat = 0.4 if normalized else 40
     # Step 1: denoised intensity-change maps, one shared scale for all panels.
     # Changes below +/-thresh are zeroed (black); colors saturate at +/-sat. The
     # color bar spans +/-(largest |change|), so the saturated plateaus beyond +/-sat are visible.
