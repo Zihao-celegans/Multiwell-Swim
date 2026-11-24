@@ -15,7 +15,7 @@ Script: generate_Fig2A.py (this folder)
 
 Command used (run from this folder, Windows PowerShell)
 -------------------------------------------------------
-python generate_Fig2A.py --data_dir "D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02" --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignments\Well_assignment_0728\dose_layout.csv" --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --wells C10 E9 D11 E6 --times 0 90 240 480 --dt 3 --thresh 10 --sat 40 --gain 1 --view merged --size 3.56 3.147 --margins 0.36 0.5 0.1 0.354 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.264 --dpi 300 --also_png --export_frames data\Fig2A_frames --output Fig2A.svg
+python generate_Fig2A.py --data_dir "D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02" --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignments\Well_assignment_0728\dose_layout.csv" --doses "0 mM" "0.0125 mM" "0.025 mM" "0.1 mM" --wells C10 E9 D11 E6 --times 0 90 240 480 --dt 3 --diff_method normalized --thresh 0.05 --sat 0.5 --gain 1 --view merged --size 3.56 3.147 --margins 0.36 0.5 0.1 0.354 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.264 --dpi 300 --also_png --export_frames data\Fig2A_frames --output Fig2A.svg
 
 All options are written out explicitly so the result does not depend on the
 script's defaults. Run time is a few minutes (frames are read from ~2.9 GB .avi files).
@@ -27,24 +27,28 @@ Reproducing without the videos (any computer)
 Needs only Python with numpy, matplotlib and opencv-python (cv2 is used to read the PNGs,
 no video is opened), plus this folder. data_dir / layout are not used.
 
-python generate_Fig2A.py --frames data\Fig2A_frames --dt 3 --thresh 10 --sat 40 --gain 1 --view merged --size 3.56 3.147 --margins 0.36 0.5 0.1 0.354 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.264 --dpi 300 --also_png --output Fig2A.svg
+python generate_Fig2A.py --frames data\Fig2A_frames --dt 3 --diff_method normalized --thresh 0.05 --sat 0.5 --gain 1 --view merged --size 3.56 3.147 --margins 0.36 0.5 0.1 0.354 0.03 --bar_offset 0.05 --axis_label_offset 0.27 --axis_label_offset_bottom 0.264 --dpi 300 --also_png --output Fig2A.svg
 
 Doses, wells and time points come from data\Fig2A_frames\manifest.csv (printed on load).
 The frame pairs are for dt = 3 s, so --dt must be 3 (the script stops otherwise); the image
 settings (--thresh, --sat, --gain, --view, layout and font options) can still be changed.
-The PNG and SVG drawn from these frames were checked against the video-based ones: PNG
-pixels are identical and the SVG is identical apart from its date/ids.
+The PNG and SVG drawn from these frames were checked against the video-based ones (with the
+earlier gray-level difference): PNG pixels were identical and the SVG identical apart from its
+date/ids. The normalized version has been drawn from the frames only.
 
 
 Fig2B - mean +/- SD ActValS vs. elapsed time, one line per dose
 ---------------------------------------------------------------
-Script: generate_Fig2B.py. Output Fig2B.svg / Fig2B.png: 3.56 in x 3.147 in (same as Fig2A), Arial 10 pt, top/right
-spines off, y ticks in scientific notation (x10^3). Same plot as the earlier "activity_by_time_ActValS_by_condition_line.png" (all 96 wells,
+Script: generate_Fig2B.py. Output Fig2B.svg / Fig2B.png: 3.56 in x 3.147 in (same as Fig2A), Arial 10 pt (the
+exponent of the x10^3 offset is drawn smaller by matplotlib), top/right spines off, inward ticks, y ticks in
+scientific notation (x10^3), x label "Time (min)", y label "Activity (A.U.)", legend "LEV dose (mM)".
+data/Fig2B_data.csv holds the per-well values behind the plot (17 time points x 96 wells).
+The plot has the same data as the earlier "activity_by_time_ActValS_by_condition_line.png" (all 96 wells,
 nothing censored, ActValS, layout = dose_layout.csv), which was made with:
   python activity_by_time.py --input_dir <data_dir> --by_condition --layout <dose_layout.csv> --save
 (inferred by matching the plotted means/SDs; the numbers are identical).
 
-From the results files (also writes the per-well values, 17 time points x 96 wells):
+From the results files (also writes data\Fig2B_data.csv):
 python generate_Fig2B.py --data_dir "D:\MultiWell_swim\Preliminary\08032026_N2_Levamisole_DRC_test02" --layout "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Well_assignments\Well_assignment_0728\dose_layout.csv" --size 3.56 3.147 --dpi 300 --also_png --export_data data\Fig2B_data.csv --output Fig2B.svg
 
 Without the results files (needs the repository checkout, since activity_by_time.py is imported):
@@ -53,7 +57,10 @@ python generate_Fig2B.py --data data\Fig2B_data.csv --size 3.56 3.147 --dpi 300 
 
 Environment
 -----------
-Python 3.8.10, matplotlib 3.7.5, numpy 1.24.4, opencv 5.1.0 (cv2), Windows.
+Fig2A original (gray-level) version: Python 3.8.10, matplotlib 3.7.5, numpy 1.24.4, opencv 5.1.0 (cv2), Windows.
+Current Fig2A (normalized) and Fig2B files: Python 3.13.12, matplotlib 3.10.8, numpy 2.4.4, opencv 4.13.0, Windows.
+Fig2B imports activity_by_time.py, which uses "X | None" type hints, so it needs Python 3.10 or newer
+(generate_Fig2A.py has no such requirement).
 Font: Arial must be installed (matplotlib falls back to another font otherwise).
 
 
@@ -93,15 +100,18 @@ Image processing (per panel)
 2. Both frames converted to grayscale by averaging the color channels, cropped to a square
    around the well (half-width = ROI radius, --pad 1.0). No other filtering or resampling
    (images drawn with nearest-neighbour interpolation).
-3. Intensity-change map = T0 - T1 (gray levels). |change| < 10 (--thresh) is set to 0 (noise removal).
+3. Intensity-change map = (T0 - T1) / (T0 + T1), normalized as in activity_analysis.py but signed, so it
+   runs from -1 to 1 (pixels with T0 + T1 = 0 are set to 0). |change| < 0.05 (--thresh) is set to 0
+   (noise removal). (--diff_method absolute gives T0 - T1 in gray levels instead, thresh 10, sat 40.)
 4. Color coding: black at 0; linear ramp to pure red (T0 brighter) / pure blue (later frame
-   brighter) at |change| = 40 (--sat); fully saturated beyond that.
+   brighter) at |change| = 0.5 (--sat); fully saturated beyond that.
 5. Merge: the map's brightness is the per-pixel opacity over the raw base image, where the
    base is the mean of the two frames (--gain 1, no brightness scaling). Unchanged pixels
    therefore show the raw gray image.
 6. Color bar: symmetric and shared by all 16 panels, spanning +/- the largest |change| in
-   the figure (-84 to 84; difference range across panels was -84 to 79). Black region = change
-   below the noise threshold; colors are saturated from 40 to the ends.
+   the figure (-0.80 to 0.80; difference range across panels was -0.758 to 0.805), labeled
+   "Normalized intensity change". Black region = change below the noise threshold; colors are
+   saturated from 0.5 to the ends.
 
 Caption note: the color bar applies to the intensity-change map only; in the merged panels
 unchanged pixels show the raw grayscale image rather than black.
@@ -110,10 +120,11 @@ unchanged pixels show the raw grayscale image rather than black.
 Parameters (all as passed above)
 --------------------------------
 --dt 3               seconds between T0 and T1
---thresh 10          noise threshold (gray levels)
---sat 40             saturation point (gray levels)
+--thresh 0.05        noise threshold (normalized change, -1..1)
+--sat 0.5            saturation point (normalized change)
 --gain 1             base image brightness (1 = as acquired)
 --view merged        (map = difference map only, raw = single frame)
+--diff_method normalized  (default; "absolute" = T0 - T1 in gray levels, with --thresh 10 --sat 40)
 --size 3.56 3.147    width x height in inches
 --margins            left right top bottom gap (inches)
 --bar_offset         grid -> color bar (inches)

@@ -17,13 +17,15 @@ figure needs as PNG files (data/Fig2A_frames/, with manifest.csv) and --frames
 redraws the figure from that folder alone, with no videos, layout file or ROI
 files (see Fig2_reproduce.txt).
 
-Each panel is built in two steps. (1) The intensity-change map (T0 - T1, where
-T1 = T0 + dt, default 3 s) is denoised by zeroing changes below +/-thresh, then
-color-coded: red where the T0 frame is brighter, blue where the later frame is
-brighter, black for no (or sub-noise) change. (2) The map is blended into the raw
-image, using the map's brightness as opacity, so no-change pixels show the raw
-grayscale. The color bar applies to the intensity-change map only. Use
---view map for the difference map alone.
+Each panel is built in two steps. (1) The intensity-change map is T0 - T1 (T1 = T0 + dt,
+default 3 s), normalized by default as (T0 - T1) / (T0 + T1), from -1 to 1 (as in
+activity_analysis.py); --diff_method absolute gives the plain gray-level difference instead.
+It is denoised by zeroing changes below +/-thresh (default 0.05; 10 gray levels for absolute),
+then color-coded, saturating at +/-sat (default 0.5; 40 for absolute): red where the T0 frame
+is brighter, blue where the later frame is brighter, black for no (or sub-noise) change.
+(2) The map is blended into the raw image, using the map's brightness as opacity, so
+no-change pixels show the raw grayscale. The color bar applies to the intensity-change map
+only. Use --view map for the difference map alone.
 """
 
 import argparse
@@ -131,12 +133,20 @@ def crop_well_frames(avi: str, roi_path: str, well: str, frame_idxs: list, pad: 
     return crops
 
 
-def denoise_diff(img_t0, img_t1, thresh: float):
-    """Intensity change T0 - T1 (gray levels) with noise removed.
+def denoise_diff(img_t0, img_t1, thresh: float, method: str = "absolute"):
+    """Intensity change T0 - T1 with noise removed.
 
+    method "absolute": difference in gray levels.
+    method "normalized": (T0 - T1) / (T0 + T1), in [-1, 1] (the normalization used in
+    activity_analysis.py, but signed; pixels with T0 + T1 = 0 are set to 0).
     Changes smaller than `thresh` in magnitude are set to 0 (no change).
     """
-    diff = img_t0.astype(np.float32) - img_t1.astype(np.float32)
+    a = img_t0.astype(np.float32)
+    b = img_t1.astype(np.float32)
+    diff = a - b
+    if method == "normalized":
+        total = a + b
+        diff = np.divide(diff, total, out=np.zeros_like(diff), where=total > 0)
     diff[np.abs(diff) < thresh] = 0
     return diff
 
@@ -281,10 +291,15 @@ def main():
     p.add_argument("--times", type=float, nargs="+", default=[0, 90, 240, 480], help="Elapsed minutes")
     p.add_argument("--frame", type=int, default=0, help="Frame index (T0) within each video")
     p.add_argument("--dt", type=float, default=3.0, help="Seconds between the T0 and T1 frames")
-    p.add_argument("--sat", type=float, default=40,
-                   help="Intensity change (gray levels) at which the color saturates to pure red/blue")
-    p.add_argument("--thresh", type=float, default=10,
-                   help="Noise level: |change| (gray levels) below this is set to 0 (black) in the difference map")
+    p.add_argument("--diff_method", choices=["absolute", "normalized"], default="normalized",
+                   help="normalized: (T0 - T1) / (T0 + T1), from -1 to 1 (the normalization of activity_analysis.py); "
+                        "absolute: T0 - T1 in gray levels")
+    p.add_argument("--sat", type=float, default=None,
+                   help="Change at which the color saturates to pure red/blue "
+                        "(gray levels, default 40; normalized: default 0.5)")
+    p.add_argument("--thresh", type=float, default=None,
+                   help="Noise level: |change| below this is set to 0 (black) in the difference map "
+                        "(gray levels, default 10; normalized: default 0.05)")
     p.add_argument("--gain", type=float, default=1.0, help="merged view: brightness multiplier for the raw base image (1 = as acquired)")
     p.add_argument("--view", choices=["merged", "map", "raw"], default="merged",
                    help="merged: difference map blended into the raw image; map: color-coded "
@@ -333,10 +348,15 @@ def main():
         if args.export_frames:
             save_frames(args.export_frames, doses, wells, times, grid, args.dt)
     args.doses, args.times = doses, times
+    normalized = args.diff_method == "normalized"
+    if args.thresh is None:
+        args.thresh = 0.05 if normalized else 10
+    if args.sat is None:
+        args.sat = 0.5 if normalized else 40
     # Step 1: denoised intensity-change maps, one shared scale for all panels.
     # Changes below +/-thresh are zeroed (black); colors saturate at +/-sat. The
     # color bar spans +/-(largest |change|), so the saturated plateaus beyond +/-sat are visible.
-    diffs = [[denoise_diff(a, b, args.thresh) for a, b in row] for row in grid]
+    diffs = [[denoise_diff(a, b, args.thresh, args.diff_method) for a, b in row] for row in grid]
     flat = [d for row in diffs for d in row]
     lim = max(float(np.abs(d).max()) for d in flat)
     dmin, dmax = -lim, lim
@@ -397,9 +417,9 @@ def main():
         cax = fig.add_axes([(left + grid_w + args.bar_offset) / fig_w, (fig_h - top - grid_h) / fig_h,
                             0.07 / fig_w, grid_h / fig_h])
         cbar = fig.colorbar(ScalarMappable(norm=Normalize(dmin, dmax), cmap=bar_cmap), cax=cax)
-        cbar.set_label("Intensity change", labelpad=0)
+        cbar.set_label("Normalized intensity change" if normalized else "Intensity change", labelpad=0)
         cbar.set_ticks(ticks)
-        cbar.set_ticklabels([f"{v:g}" for v in ticks])
+        cbar.set_ticklabels([f"{v:.1f}" if normalized and v else f"{v:g}" for v in ticks])
         cbar.ax.tick_params(length=0, pad=1)
         cbar.outline.set_visible(False)
     fig.savefig(args.output, dpi=args.dpi)
