@@ -70,9 +70,13 @@ def main():
     src.add_argument("--data", help="Per-trial means CSV written by --export_data")
     p.add_argument("--export_data", default=None, help="Save the per-trial strain means to a CSV (with --base_dir)")
     p.add_argument("--traits", nargs="+", default=TRAIT_ORDER, help="Traits to plot, in panel order (default: all)")
-    p.add_argument("--ncols", type=int, default=4, help="Panels per row")
-    p.add_argument("--panel_size", type=float, nargs=2, default=[1.8, 1.6], metavar=("W", "H"),
+    p.add_argument("--ncols", type=int, default=3, help="Panels per row")
+    p.add_argument("--panel_size", type=float, nargs=2, default=[2.4, 1.7], metavar=("W", "H"),
                    help="Size of one panel incl. labels, inches")
+    p.add_argument("--dodge", type=float, default=0.5,
+                   help="Total horizontal spread of the strains around each dose, as a fraction of the dose spacing")
+    p.add_argument("--legend_ncol", type=int, default=6, help="Strain legend entries per row")
+    p.add_argument("--legend_height", type=float, default=0.6, help="Space reserved on top for the legend, inches")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--also_png", action="store_true", help="Also save a PNG next to the SVG")
     p.add_argument("--output_prefix", default="Fig4", help="Writes <prefix>.svg")
@@ -96,12 +100,16 @@ def main():
     cmap = plt.get_cmap("tab10")
     handler_map = {ErrorbarContainer: HandlerErrorbar(yerr_size=0.4)}
     doses = sorted(means["dose_mM"].unique())
+    # Strains are spread symmetrically around each dose; --dodge is the total spread as a fraction of the dose spacing.
+    spacing = min(b - a for a, b in zip(doses, doses[1:]))
+    step = args.dodge * spacing / (len(STRAINS) - 1)
+    half_spread = args.dodge * spacing / 2
 
-    # The legend takes the first free slot after the last panel (a new row if the grid is full).
     n_panels = len(args.traits)
-    nrows = math.ceil((n_panels + 1) / args.ncols)
+    nrows = math.ceil(n_panels / args.ncols)
     fig, axes = plt.subplots(nrows, args.ncols, figsize=(args.panel_size[0] * args.ncols,
-                                                         args.panel_size[1] * nrows), squeeze=False)
+                                                         args.panel_size[1] * nrows + args.legend_height),
+                             squeeze=False)
     flat = axes.ravel()
 
     for ax, trait in zip(flat, args.traits):
@@ -111,13 +119,15 @@ def main():
             tab = sub[sub["strain"] == strain].pivot(index="trial", columns="dose_mM", values="value")
             if tab.empty:
                 continue
-            ax.errorbar(tab.columns, tab.mean(axis=0), yerr=tab.std(axis=0, ddof=1), color=cmap(idx % cmap.N),
-                        marker="os"[idx // cmap.N], linestyle=["-", "--"][idx // cmap.N], linewidth=1,
-                        markersize=3, capsize=2, elinewidth=0.75, label=strain, zorder=3)
+            ax.errorbar(tab.columns + (idx - (len(STRAINS) - 1) / 2) * step, tab.mean(axis=0),
+                        yerr=tab.std(axis=0, ddof=1), color=cmap(idx % cmap.N),
+                        marker="os"[idx // cmap.N], linestyle="none", markersize=3, capsize=2,
+                        markerfacecolor="white" if idx >= cmap.N else cmap(idx % cmap.N),  # hollow squares
+                        markeredgewidth=0.9, elinewidth=0.75, label=strain, zorder=3)
         ax.set_title(trait, pad=2)
         ax.set_xticks(doses)
         ax.set_xticklabels([f"{d:g}" for d in doses])
-        pad = 0.08 * (doses[-1] - doses[0])
+        pad = half_spread + 0.05 * (doses[-1] - doses[0])
         ax.set_xlim(doses[0] - pad, doses[-1] + pad)
         ax.tick_params(direction="in", pad=2)
         ax.margins(y=0.08)
@@ -128,17 +138,15 @@ def main():
     for i, ax in enumerate(flat[:n_panels]):
         if i + args.ncols >= n_panels:
             ax.set_xlabel("Levamisole (mM)", labelpad=1)
-
-    handles, labels = flat[0].get_legend_handles_labels()
-    legend_ax = flat[n_panels]
-    legend_ax.axis("off")
-    legend_ax.legend(handles, labels, title="Strain", loc="center left", frameon=False, fontsize=8,
-                     title_fontsize=8, handlelength=1.5, labelspacing=0.2, borderaxespad=0,
-                     handler_map=handler_map)
-    for ax in flat[n_panels + 1:]:
+    for ax in flat[n_panels:]:
         ax.axis("off")
 
-    fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.8)
+    # Strain legend across the top, in rows of --legend_ncol entries
+    handles, labels = flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, title="Strain", loc="upper center", ncol=args.legend_ncol, frameon=False,
+               fontsize=8, title_fontsize=8, handlelength=1.5, labelspacing=0.2, columnspacing=1.0,
+               borderaxespad=0.1, handler_map=handler_map)
+    fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.8, rect=(0, 0, 1, 1 - args.legend_height / fig.get_figheight()))
     fig.savefig(args.output_prefix + ".svg", dpi=args.dpi)
     print(f"Saved {args.output_prefix}.svg")
     if args.also_png:

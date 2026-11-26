@@ -1,7 +1,7 @@
 Figure 4 - curve traits of the CeDiv strains across levamisole dose (23 traits x 12 strains x 3 doses, 3 trials)
 ==============================================================================================================
 
-Output: Fig4.svg (+ Fig4.png, 300 dpi); 4 panels per row, one panel per trait (order as in the H2 plots), legend in the free slot.
+Output: Fig4.svg (+ Fig4.png, 300 dpi); 3 panels per row (layout of the merged H2 plot), one panel per trait in the same order, strain legend on top in two rows.
 Script: generate_Fig4.py.  data/Fig4_data.csv = per-trial strain means (trial, strain, dose_mM, trait, value, n_wells) behind the plot.
 
 Data: curve_traits_ActValS_per_well.csv (Ce_div_set_analysis\curve_traits.py) of the three official trials
