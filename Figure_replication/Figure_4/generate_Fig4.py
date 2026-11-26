@@ -75,12 +75,12 @@ def main():
     p.add_argument("--export_data", default=None, help="Save the per-trial strain means to a CSV (with --base_dir)")
     p.add_argument("--traits", nargs="+", default=TRAIT_ORDER, help="Traits to plot, in panel order (default: all)")
     p.add_argument("--ncols", type=int, default=3, help="Panels per row")
-    p.add_argument("--panel_size", type=float, nargs=2, default=[2.4, 1.7], metavar=("W", "H"),
-                   help="Size of one panel incl. labels, inches")
+    p.add_argument("--size", type=float, nargs=2, default=[7.5, 10.0], metavar=("W", "H"),
+                   help="Size of the whole figure, inches (fixed; nothing is cropped)")
     p.add_argument("--dodge", type=float, default=0.5,
                    help="Total horizontal spread of the strains around each dose, as a fraction of the dose spacing")
     p.add_argument("--legend_ncol", type=int, default=6, help="Strain legend entries per row")
-    p.add_argument("--legend_height", type=float, default=0.6, help="Space reserved on top for the legend, inches")
+    p.add_argument("--legend_height", type=float, default=0.4, help="Space reserved on top for the legend, inches")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--also_png", action="store_true", help="Also save a PNG next to the SVG")
     p.add_argument("--output_prefix", default="Fig4", help="Writes <prefix>.svg")
@@ -111,9 +111,7 @@ def main():
 
     n_panels = len(args.traits)
     nrows = math.ceil(n_panels / args.ncols)
-    fig, axes = plt.subplots(nrows, args.ncols, figsize=(args.panel_size[0] * args.ncols,
-                                                         args.panel_size[1] * nrows + args.legend_height),
-                             squeeze=False)
+    fig, axes = plt.subplots(nrows, args.ncols, figsize=args.size, squeeze=False)
     flat = axes.ravel()
 
     for ax, trait in zip(flat, args.traits):
@@ -129,10 +127,14 @@ def main():
                         markerfacecolor="white" if idx >= cmap.N else cmap(idx % cmap.N),  # hollow squares
                         markeredgewidth=0.9, elinewidth=0.75, label=strain, zorder=3)
         ax.set_title(trait, pad=2)
-        ax.set_xticks(doses)
-        ax.set_xticklabels([f"{d:g}" for d in doses])
-        pad = half_spread + 0.05 * (doses[-1] - doses[0])
-        ax.set_xlim(doses[0] - pad, doses[-1] + pad)
+        # Ticks only at the doses that have data (no 0 mM tick for the control-normalized traits)
+        have = sorted(sub["dose_mM"].unique())
+        ax.set_xticks(have)
+        ax.set_xticklabels([f"{d:g}" for d in have])
+        # Same x range (and scale) in every panel, centred on the doses that have data
+        half_width = half_spread + 0.05 * (doses[-1] - doses[0]) + (doses[-1] - doses[0]) / 2
+        centre = (have[0] + have[-1]) / 2
+        ax.set_xlim(centre - half_width, centre + half_width)
         ax.tick_params(direction="in", pad=2)
         ax.margins(y=0.08)
         for side in ("top", "right"):
@@ -147,9 +149,10 @@ def main():
 
     # Strain legend across the top, in rows of --legend_ncol entries
     handles, labels = flat[0].get_legend_handles_labels()
-    fig.legend(handles, labels, title="Strain", loc="upper center", ncol=args.legend_ncol, frameon=False,
-               fontsize=8, title_fontsize=8, handlelength=1.5, labelspacing=0.2, columnspacing=1.0,
+    fig.legend(handles, labels, loc="upper center", ncol=args.legend_ncol, frameon=False,
+               fontsize=8, handlelength=1.5, labelspacing=0.2, columnspacing=1.0,
                borderaxespad=0.1, handler_map=handler_map)
+    # No bbox_inches="tight": the page size must stay exactly --size.
     fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.8, rect=(0, 0, 1, 1 - args.legend_height / fig.get_figheight()))
     fig.savefig(args.output_prefix + ".svg", dpi=args.dpi)
     print(f"Saved {args.output_prefix}.svg")
