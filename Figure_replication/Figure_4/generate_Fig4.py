@@ -62,6 +62,9 @@ SYMBOLS = {"A0": (r"\mathit{A}", "0"), "auc": (r"\mathrm{AUC}", ""),
 MODE_SUBSCRIPTS = {"raw": "", "delta": r"\Delta", "ratio": r"\mathit{r}"}
 ROMAN = ["i", "ii", "iii", "iv", "v", "vi"]  # column tags of the panels
 TITLE_PAD = 5  # pt between the axes top and the baseline of the trait label / panel tags
+NUMERAL_OFFSET = 14  # pt between the column numeral and the y axis
+TAG_SIZE = 12  # pt, panel tags (row letters and column numerals)
+LETTER_GAP = 4  # pt between the row letters and the column numeral (i)
 # Unit of the raw and delta versions, and of the ratio version ("" = unitless)
 UNITS = {"A0": ("A.U.", ""), "range": ("A.U.", ""), "auc": ("A.U.\u00b7min", "min"),
          "slope_init": ("A.U.\u00b7min$^{-1}$", "min$^{-1}$"), "slope_final": ("A.U.\u00b7min$^{-1}$", "min$^{-1}$"),
@@ -118,8 +121,15 @@ def main():
     p.add_argument("--ncols", type=int, default=3, help="Panels per row")
     p.add_argument("--size", type=float, nargs=2, default=[7.5, 10.0], metavar=("W", "H"),
                    help="Size of the whole figure, inches (fixed; nothing is cropped)")
-    p.add_argument("--dodge", type=float, default=0.5,
+    p.add_argument("--dodge", type=float, default=0.6,
                    help="Total horizontal spread of the strains around each dose, as a fraction of the dose spacing")
+    p.add_argument("--start_pad", type=float, default=0.12,
+                   help="Empty x range left of the outermost strains of a panel (keeps them off the y axis), as a "
+                        "fraction of the dose spacing")
+    p.add_argument("--end_pad", type=float, default=0.05,
+                   help="Empty x range beyond the outermost strains of a panel, as a fraction of the dose spacing")
+    p.add_argument("--col_gap", type=float, default=10.0,
+                   help="White space (pt) between the end of a panel's x axis and the numeral of the next column")
     p.add_argument("--legend_ncol", type=int, default=6, help="Strain legend entries per row")
     p.add_argument("--legend_height", type=float, default=0.4, help="Space reserved on top for the legend, inches")
     p.add_argument("--dpi", type=int, default=300)
@@ -144,17 +154,23 @@ def main():
                          "svg.fonttype": "none", "mathtext.fontset": "custom", "mathtext.default": "regular",
                          "mathtext.rm": "Arial", "mathtext.it": "Arial:italic", "mathtext.bf": "Arial:bold"})
     cmap = plt.get_cmap("tab10")
-    handler_map = {ErrorbarContainer: HandlerErrorbar(yerr_size=0.4)}
+    handler_map = {ErrorbarContainer: HandlerErrorbar(yerr_size=0.6)}
     doses = sorted(means["dose_mM"].unique())
     # Strains are spread symmetrically around each dose; --dodge is the total spread as a fraction of the dose spacing.
     spacing = min(b - a for a, b in zip(doses, doses[1:]))
     step = args.dodge * spacing / (len(STRAINS) - 1)
     half_spread = args.dodge * spacing / 2
+    end_pad = args.end_pad * spacing
+    start_pad = args.start_pad * spacing
+    full_span = doses[-1] - doses[0] + 2 * half_spread + start_pad + end_pad  # x range of a panel with every dose
 
     n_panels = len(args.traits)
     nrows = math.ceil(n_panels / args.ncols)
     fig, axes = plt.subplots(nrows, args.ncols, figsize=args.size, squeeze=False)
     flat = axes.ravel()
+    narrow_axes = []
+    numeral_by_col = {}
+    letters = []
 
     for i, (ax, trait) in enumerate(zip(flat, args.traits)):
         sub = means[means["trait"] == trait]
@@ -165,7 +181,7 @@ def main():
                 continue
             ax.errorbar(tab.columns + (idx - (len(STRAINS) - 1) / 2) * step, tab.mean(axis=0),
                         yerr=tab.std(axis=0, ddof=1), color=cmap(idx % cmap.N),
-                        marker="os"[idx // cmap.N], linestyle="none", markersize=3, capsize=2,
+                        marker="os"[idx // cmap.N], linestyle="none", markersize=3, capsize=0,
                         markerfacecolor="white" if idx >= cmap.N else cmap(idx % cmap.N),  # hollow squares
                         markeredgewidth=0.9, elinewidth=0.75, label=strain, zorder=3)
         # Trait symbol above the y axis, left-aligned with it
@@ -174,10 +190,12 @@ def main():
         have = sorted(sub["dose_mM"].unique())
         ax.set_xticks(have)
         ax.set_xticklabels([f"{d:g}" for d in have])
-        # Same x range (and scale) in every panel, centred on the doses that have data
-        half_width = half_spread + 0.05 * (doses[-1] - doses[0]) + (doses[-1] - doses[0]) / 2
-        centre = (have[0] + have[-1]) / 2
-        ax.set_xlim(centre - half_width, centre + half_width)
+        # Same x scale in every panel: the range is the data extent (outer doses +- the strain spread) plus --start_pad /
+        # --end_pad; panels with fewer doses get a shorter axes, resized below to keep the scale.
+        lo = have[0] - half_spread - start_pad
+        hi = have[-1] + half_spread + end_pad
+        ax.set_xlim(lo, hi)
+        narrow_axes.append((ax, i % args.ncols, (hi - lo) / full_span))
         ax.tick_params(direction="in", pad=2)
         ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=3))  # 3-4 y ticks in view
         # Scientific notation (factor moved into the label below) for tick values of 1000 or more, or below 0.01
@@ -195,16 +213,18 @@ def main():
             ax.set_xlabel("LEV dose (mM)", labelpad=1)
         # Column numeral just left of the y axis, level with the trait label (above the top tick label)
         numeral = ax.annotate(panel_numeral(i, args.ncols), xy=(0, 1), xycoords="axes fraction",
-                              xytext=(-14, TITLE_PAD), textcoords="offset points", ha="right", va="baseline",
-                              fontsize=10)
+                              xytext=(-NUMERAL_OFFSET, TITLE_PAD), textcoords="offset points", ha="right",
+                              va="baseline", fontsize=TAG_SIZE)
         numeral.set_in_layout(False)
+        numeral_by_col[i % args.ncols] = numeral
         if i % args.ncols == 0:
             # Bold row letter, centred on a common x near the left page edge, level with the panel title
-            letter = ax.annotate(chr(ord("A") + i // args.ncols), xy=(0.0125, 1),
+            letter = ax.annotate(chr(ord("A") + i // args.ncols), xy=(0, 1),
                                  xycoords=("figure fraction", "axes fraction"), xytext=(0, TITLE_PAD),
-                                 textcoords="offset points", ha="center", va="baseline", fontsize=10,
+                                 textcoords="offset points", ha="center", va="baseline", fontsize=TAG_SIZE,
                                  fontweight="bold")
-            letter.set_in_layout(False)  # the reserved left margin holds it; it must not widen the axes box
+            letter.set_in_layout(False)  # it must not widen the axes box; x is set once the layout is known
+            letters.append(letter)
     for ax in flat[n_panels:]:
         ax.axis("off")
 
@@ -222,12 +242,36 @@ def main():
     # Strain legend across the top, in rows of --legend_ncol entries
     handles, labels = flat[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=args.legend_ncol, frameon=False,
-               fontsize=10, handlelength=1.5, labelspacing=0.2, columnspacing=1.0,
+               fontsize=10, handlelength=1.5, labelspacing=0.5, columnspacing=1.0,
                borderaxespad=0.1, handler_map=handler_map)
     # No bbox_inches="tight": the page size must stay exactly --size.
-    # Left margin leaves room for the row letters
-    fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.1,
-                     rect=(0.035, 0, 1, 1 - args.legend_height / fig.get_figheight()))
+    fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.1, rect=(0, 0, 1, 1 - args.legend_height / fig.get_figheight()))
+    # Resize the axes: the x scale is the same in every panel (panels with fewer doses are proportionally shorter), and
+    # the white space between the end of an axis and the left edge of the next column's numeral is --col_gap, so the
+    # panels use all the width that the numerals and gaps leave; the last axes end at the original right edge.
+    # The row letters touch the left page edge (widest letter, others centred on it), LETTER_GAP before the numeral (i).
+    col_factor = {c: f for _, c, f in narrow_axes}
+    first_row = flat[:args.ncols]
+    right = first_row[-1].get_position().x1
+    renderer = fig.canvas.get_renderer()
+    fig_w_px = fig.bbox.width
+    px_per_pt = fig.dpi / 72
+    reserved = [(numeral_by_col[c].get_window_extent(renderer).width + NUMERAL_OFFSET * px_per_pt) / fig_w_px
+                for c in range(len(first_row))]  # numeral width + its distance to the y axis, as figure fraction
+    letter_w = max(letter.get_window_extent(renderer).width for letter in letters)
+    for letter in letters:
+        letter.xy = (letter_w / 2 / fig_w_px, 1)
+    left0 = (letter_w + LETTER_GAP * px_per_pt) / fig_w_px + reserved[0]
+    gap = args.col_gap * px_per_pt / fig_w_px  # white space between an axis end and the next numeral, figure fraction
+    full_w = (right - left0 - sum(reserved[1:]) - (len(first_row) - 1) * gap) / sum(
+        col_factor.get(c, 1.0) for c in range(len(first_row)))  # widest panel; all panels share one x scale
+    widths = [full_w * col_factor.get(c, 1.0) for c in range(len(first_row))]
+    lefts = [left0]
+    for c in range(1, len(first_row)):
+        lefts.append(lefts[-1] + widths[c - 1] + gap + reserved[c])
+    for ax, c, _ in narrow_axes:
+        pos = ax.get_position()
+        ax.set_position((lefts[c], pos.y0, widths[c], pos.height))
     fig.savefig(args.output_prefix + ".svg", dpi=args.dpi)
     print(f"Saved {args.output_prefix}.svg")
     if args.also_png:
