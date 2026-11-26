@@ -3,6 +3,11 @@ Figure 4 - curve traits of the CeDiv strains across levamisole dose (27 traits x
 
 Output: Fig4.svg (+ Fig4.png, 300 dpi), page 7.5 x 10 in (fixed, --size); 3 panels per row (layout of the merged H2 plot), one panel per trait, 9 rows,
   each row = raw / delta / ratio version of a trait; strain legend (no title) on top in two rows.
+  Panel labels are math symbols with units above each y axis: A_0, R (range), AUC, k_init, k_final, k_rec (slopes), t_10 / t_50 / t_90;
+  subscript Δ = control-subtracted (delta), r = control-divided (ratio), no extra subscript = raw activity.
+  Row order: A_0, R, AUC, k_init, k_final, k_rec, t_10, t_50, t_90. x label: "LEV dose (mM)".
+  Panel tags: bold row letter A-I at the left page edge (first column only); a plain column numeral just left of every
+  y axis: (i) raw, (ii) delta, (iii) ratio.
   auc_norm is calculated and kept in data/Fig4_data.csv but not plotted.
 Script: generate_Fig4.py.  data/Fig4_data.csv = per-trial strain means (trial, strain, dose_mM, trait, value, n_wells) behind the plot.
 

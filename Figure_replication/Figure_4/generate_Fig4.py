@@ -22,11 +22,13 @@ Redraw from the exported CSV alone:
 import argparse
 import math
 import os
+import re
 
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.container import ErrorbarContainer
 from matplotlib.legend_handler import HandlerErrorbar
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 
 TRIALS = ["10102026_CeDiv_Leva_test02", "10212026_CeDiv_Leva_test03", "10312026_CeDiv_Leva_test04"]
 CSV_NAME = os.path.join("traits", "curve_traits_ActValS_per_well.csv")
@@ -41,16 +43,55 @@ NORMALIZED_TRAITS = ["range_delta", "range_ratio", "slope_rec_delta", "slope_rec
                      "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
                      "A0_delta", "auc_delta", "slope_init_delta", "slope_final_delta",
                      "A0_ratio", "auc_ratio", "slope_init_ratio", "slope_final_ratio"]
-# Panel order of plot_broad_sense_H2.R (auc_norm is analysed and exported but not plotted)
+# Panel order: each row is the raw / delta / ratio version of one trait (auc_norm is analysed and exported but not plotted)
 TRAIT_ORDER = ["A0", "A0_delta", "A0_ratio",
+               "range_raw", "range_delta", "range_ratio",
                "auc", "auc_delta", "auc_ratio",
                "slope_init", "slope_init_delta", "slope_init_ratio",
                "slope_final", "slope_final_delta", "slope_final_ratio",
-               "range_raw", "range_delta", "range_ratio",
+               "slope_rec_raw", "slope_rec_delta", "slope_rec_ratio",
                "t_p10_raw", "t_p10_delta", "t_p10_ratio",
                "t_p50_raw", "t_p50_delta", "t_p50_ratio",
-               "t_p90_raw", "t_p90_delta", "t_p90_ratio",
-               "slope_rec_raw", "slope_rec_delta", "slope_rec_ratio"]
+               "t_p90_raw", "t_p90_delta", "t_p90_ratio"]
+
+# Trait symbol (mathtext) and its own subscript; the normalization adds Delta (delta) or r (ratio), raw adds nothing.
+SYMBOLS = {"A0": (r"\mathit{A}", "0"), "auc": (r"\mathrm{AUC}", ""),
+           "slope_init": (r"\mathit{k}", r"\mathrm{init}"), "slope_final": (r"\mathit{k}", r"\mathrm{final}"),
+           "slope_rec": (r"\mathit{k}", r"\mathrm{rec}"), "range": (r"\mathit{R}", ""),
+           "t_p10": (r"\mathit{t}", "10"), "t_p50": (r"\mathit{t}", "50"), "t_p90": (r"\mathit{t}", "90")}
+MODE_SUBSCRIPTS = {"raw": "", "delta": r"\Delta", "ratio": r"\mathit{r}"}
+ROMAN = ["i", "ii", "iii", "iv", "v", "vi"]  # column tags of the panels
+TITLE_PAD = 5  # pt between the axes top and the baseline of the trait label / panel tags
+# Unit of the raw and delta versions, and of the ratio version ("" = unitless)
+UNITS = {"A0": ("A.U.", ""), "range": ("A.U.", ""), "auc": ("A.U.\u00b7min", "min"),
+         "slope_init": ("A.U.\u00b7min$^{-1}$", "min$^{-1}$"), "slope_final": ("A.U.\u00b7min$^{-1}$", "min$^{-1}$"),
+         "slope_rec": ("A.U.\u00b7min$^{-1}$", "min$^{-1}$"), "t_p10": ("min", "min"), "t_p50": ("min", "min"),
+         "t_p90": ("min", "min")}
+
+
+def trait_label(trait: str, exponent: int = None) -> str:
+    """Mathtext label with unit of a trait column name, e.g. t_p10_delta -> $t_{10,Δ}$ (min); unknown names are
+    returned as is. exponent adds a x10^exponent factor to the unit (values shown divided by 10^exponent).
+    """
+    base, _, mode = trait.rpartition("_")
+    if mode in MODE_SUBSCRIPTS and base in SYMBOLS:
+        symbol, sub = SYMBOLS[base]
+        subscript = ",".join(s for s in (sub, MODE_SUBSCRIPTS[mode]) if s)
+    elif trait in SYMBOLS:
+        base, mode = trait, "raw"
+        (symbol, subscript) = SYMBOLS[trait]
+    else:
+        return trait
+    unit = UNITS[base][mode == "ratio"]
+    if exponent:
+        unit = f"\u00d710$^{{{exponent}}}$ {unit}".strip()
+    label = f"${symbol}_{{{subscript}}}$" if subscript else f"${symbol}$"
+    return f"{label} ({unit})" if unit else label
+
+
+def panel_numeral(index: int, ncols: int) -> str:
+    """Column numeral of the panel, e.g. (iii)."""
+    return f"({ROMAN[index % ncols]})"
 
 
 def load_trial_means(base_dir: str) -> pd.DataFrame:
@@ -98,9 +139,10 @@ def main():
     if unknown:
         raise SystemExit(f"Unknown trait(s): {sorted(unknown)}")
 
-    plt.rcParams.update({"font.family": "Arial", "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8,
-                         "xtick.labelsize": 7, "ytick.labelsize": 7, "legend.fontsize": 8,
-                         "svg.fonttype": "none", "mathtext.default": "regular"})
+    plt.rcParams.update({"font.family": "Arial", "font.size": 10, "axes.labelsize": 10, "axes.titlesize": 10,
+                         "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 10,
+                         "svg.fonttype": "none", "mathtext.fontset": "custom", "mathtext.default": "regular",
+                         "mathtext.rm": "Arial", "mathtext.it": "Arial:italic", "mathtext.bf": "Arial:bold"})
     cmap = plt.get_cmap("tab10")
     handler_map = {ErrorbarContainer: HandlerErrorbar(yerr_size=0.4)}
     doses = sorted(means["dose_mM"].unique())
@@ -114,7 +156,7 @@ def main():
     fig, axes = plt.subplots(nrows, args.ncols, figsize=args.size, squeeze=False)
     flat = axes.ravel()
 
-    for ax, trait in zip(flat, args.traits):
+    for i, (ax, trait) in enumerate(zip(flat, args.traits)):
         sub = means[means["trait"] == trait]
         for idx, strain in enumerate(STRAINS):
             # trials x doses of per-trial strain means; mean / SD across trials (SD needs >= 2 trials)
@@ -126,7 +168,8 @@ def main():
                         marker="os"[idx // cmap.N], linestyle="none", markersize=3, capsize=2,
                         markerfacecolor="white" if idx >= cmap.N else cmap(idx % cmap.N),  # hollow squares
                         markeredgewidth=0.9, elinewidth=0.75, label=strain, zorder=3)
-        ax.set_title(trait, pad=2)
+        # Trait symbol above the y axis, left-aligned with it
+        ax.set_title(trait_label(trait), loc="left", pad=TITLE_PAD, fontsize=10)
         # Ticks only at the doses that have data (no 0 mM tick for the control-normalized traits)
         have = sorted(sub["dose_mM"].unique())
         ax.set_xticks(have)
@@ -136,6 +179,12 @@ def main():
         centre = (have[0] + have[-1]) / 2
         ax.set_xlim(centre - half_width, centre + half_width)
         ax.tick_params(direction="in", pad=2)
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=3))  # 3-4 y ticks in view
+        # Scientific notation (factor moved into the label below) for tick values of 1000 or more, or below 0.01
+        formatter = ScalarFormatter()
+        formatter.set_powerlimits((-3, 3))
+        formatter.set_useOffset(False)
+        ax.yaxis.set_major_formatter(formatter)
         ax.margins(y=0.08)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
@@ -143,17 +192,42 @@ def main():
     # x label only on the lowest panel of each column
     for i, ax in enumerate(flat[:n_panels]):
         if i + args.ncols >= n_panels:
-            ax.set_xlabel("Levamisole (mM)", labelpad=1)
+            ax.set_xlabel("LEV dose (mM)", labelpad=1)
+        # Column numeral just left of the y axis, level with the trait label (above the top tick label)
+        numeral = ax.annotate(panel_numeral(i, args.ncols), xy=(0, 1), xycoords="axes fraction",
+                              xytext=(-14, TITLE_PAD), textcoords="offset points", ha="right", va="baseline",
+                              fontsize=10)
+        numeral.set_in_layout(False)
+        if i % args.ncols == 0:
+            # Bold row letter, centred on a common x near the left page edge, level with the panel title
+            letter = ax.annotate(chr(ord("A") + i // args.ncols), xy=(0.0125, 1),
+                                 xycoords=("figure fraction", "axes fraction"), xytext=(0, TITLE_PAD),
+                                 textcoords="offset points", ha="center", va="baseline", fontsize=10,
+                                 fontweight="bold")
+            letter.set_in_layout(False)  # the reserved left margin holds it; it must not widen the axes box
     for ax in flat[n_panels:]:
         ax.axis("off")
+
+    # An offset text such as 1e6 would need extra room above the axes: hide it and put the factor in the label
+    fig.canvas.draw()
+    for i, (ax, trait) in enumerate(zip(flat, args.traits)):
+        offset = ax.yaxis.get_offset_text().get_text()
+        match = re.fullmatch(r"1e(-?\d+)", offset.replace("\u2212", "-"))
+        if match:
+            ax.yaxis.get_offset_text().set_visible(False)
+            ax.set_title(trait_label(trait, int(match.group(1))), loc="left", pad=TITLE_PAD, fontsize=10)
+        elif offset:
+            raise SystemExit(f"Unexpected y offset text {offset!r} in panel {trait}")
 
     # Strain legend across the top, in rows of --legend_ncol entries
     handles, labels = flat[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=args.legend_ncol, frameon=False,
-               fontsize=8, handlelength=1.5, labelspacing=0.2, columnspacing=1.0,
+               fontsize=10, handlelength=1.5, labelspacing=0.2, columnspacing=1.0,
                borderaxespad=0.1, handler_map=handler_map)
     # No bbox_inches="tight": the page size must stay exactly --size.
-    fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.8, rect=(0, 0, 1, 1 - args.legend_height / fig.get_figheight()))
+    # Left margin leaves room for the row letters
+    fig.tight_layout(pad=0.3, w_pad=0.8, h_pad=0.1,
+                     rect=(0.035, 0, 1, 1 - args.legend_height / fig.get_figheight()))
     fig.savefig(args.output_prefix + ".svg", dpi=args.dpi)
     print(f"Saved {args.output_prefix}.svg")
     if args.also_png:
