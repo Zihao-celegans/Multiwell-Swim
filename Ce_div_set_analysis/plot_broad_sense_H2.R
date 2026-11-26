@@ -2,7 +2,7 @@ library(tidyverse)
 
 # Usage: Rscript plot_broad_sense_H2.R <H2.csv> [<H2.csv> ...]
 args <- commandArgs(trailingOnly = TRUE)
-base <- "C:/Users/jl200/Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1"
+base <- Sys.getenv("MULTIWELL_BASE", file.path(Sys.getenv("USERPROFILE"), "Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1"))
 if (length(args) == 0) {
   args <- file.path(base, c("10102026_CeDiv_Leva_test02", "10212026_CeDiv_Leva_test03"),
                     "traits/curve_traits_ActValS_broad_sense_H2.csv")
@@ -12,13 +12,15 @@ trait_order <- c("A0", "A0_delta", "A0_ratio",
                  "auc", "auc_delta", "auc_ratio",
                  "slope_init", "slope_init_delta", "slope_init_ratio",
                  "slope_final", "slope_final_delta", "slope_final_ratio",
-                 "auc_norm", "range_delta", "range_ratio",
-                 "t_p10_delta", "t_p50_delta", "t_p90_delta",
-                 "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
-                 "slope_rec_delta", "slope_rec_ratio")
+                 "range_raw", "range_delta", "range_ratio",
+                 "t_p10_raw", "t_p10_delta", "t_p10_ratio",
+                 "t_p50_raw", "t_p50_delta", "t_p50_ratio",
+                 "t_p90_raw", "t_p90_delta", "t_p90_ratio",
+                 "slope_rec_raw", "slope_rec_delta", "slope_rec_ratio")
 
 plot_H2 <- function(csv) {
   res <- read_csv(csv, show_col_types = FALSE) %>%
+    filter(trait %in% trait_order) %>%  # auc_norm is analysed but not plotted
     mutate(trait = factor(trait, levels = trait_order),
            dose_label = factor(dose_mM, levels = sort(unique(dose_mM))))
   trial <- basename(dirname(dirname(csv)))

@@ -6,6 +6,8 @@ trial (EG4725 and JU258 are absent from test02) are averaged over the trials tha
 single trial has no error bar.
 Traits normalized to each strain's own 0 mM control (the *_delta / *_ratio traits) are not defined at 0 mM
 (the control is its own reference), so they are drawn at the treated doses only, as in the H2 analysis.
+The *_raw traits (range, t_p<N>, slope_rec on the raw activity) are defined at every dose, 0 mM included.
+auc_norm is kept in the exported data but not plotted.
 
 Input: the per-well trait tables written by `Ce_div_set_analysis\\curve_traits.py`
 (<trial>\\traits\\curve_traits_ActValS_per_well.csv).
@@ -32,21 +34,23 @@ CSV_NAME = os.path.join("traits", "curve_traits_ActValS_per_well.csv")
 STRAINS = ["CX11314", "JU258", "DL238", "MY23", "JT11398", "JU775", "CB4856", "EG4725", "ED3017", "LKC34",
            "MY16", "N2"]
 # Same trait lists as Ce_div_set_analysis\broad_sense_H2.R (normalized traits have no 0 mM value).
-RAW_TRAITS = ["A0", "auc", "auc_norm", "slope_init", "slope_final"]
+RAW_TRAITS = ["A0", "auc", "auc_norm", "slope_init", "slope_final",
+              "range_raw", "slope_rec_raw", "t_p10_raw", "t_p50_raw", "t_p90_raw"]
 NORMALIZED_TRAITS = ["range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
                      "t_p10_delta", "t_p50_delta", "t_p90_delta",
                      "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
                      "A0_delta", "auc_delta", "slope_init_delta", "slope_final_delta",
                      "A0_ratio", "auc_ratio", "slope_init_ratio", "slope_final_ratio"]
-# Panel order of plot_broad_sense_H2.R
+# Panel order of plot_broad_sense_H2.R (auc_norm is analysed and exported but not plotted)
 TRAIT_ORDER = ["A0", "A0_delta", "A0_ratio",
                "auc", "auc_delta", "auc_ratio",
                "slope_init", "slope_init_delta", "slope_init_ratio",
                "slope_final", "slope_final_delta", "slope_final_ratio",
-               "auc_norm", "range_delta", "range_ratio",
-               "t_p10_delta", "t_p50_delta", "t_p90_delta",
-               "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
-               "slope_rec_delta", "slope_rec_ratio"]
+               "range_raw", "range_delta", "range_ratio",
+               "t_p10_raw", "t_p10_delta", "t_p10_ratio",
+               "t_p50_raw", "t_p50_delta", "t_p50_ratio",
+               "t_p90_raw", "t_p90_delta", "t_p90_ratio",
+               "slope_rec_raw", "slope_rec_delta", "slope_rec_ratio"]
 
 
 def load_trial_means(base_dir: str) -> pd.DataFrame:

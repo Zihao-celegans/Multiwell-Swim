@@ -25,6 +25,13 @@ Traits implemented so far:
                 Reported as fitted, so a decaying well is negative
     slope_final same fit over the last --final_slope_points timepoints, so a
                 well that is recovering by the end of the run is positive
+    range_raw   (first timepoint - min) of the well's raw activity curve, in A.U.
+    t_p10_raw, t_p50_raw, t_p90_raw
+                same time-to-fraction definition as t_p<N>_<delta|ratio> below,
+                on the raw activity curve
+    slope_rec_raw
+                same recovery-slope definition as slope_rec_<delta|ratio> below,
+                on the raw activity curve (A.U./min)
     range_delta (first timepoint - min) of the well's control-subtracted
                 activity curve (see the control normalization below), in A.U.
     range_ratio (first timepoint - min) of the well's control-divided activity
@@ -56,13 +63,13 @@ Traits implemented so far:
 Alongside the per-well CSV it saves grouped box plots (median/quartiles across
 wells, with the individual wells overlaid) for every strain x dose
 combination: one figure for the AUC traits, one for the initial slope, one for
-the final slope, one each for range_delta, range_ratio, slope_rec_delta and
+the final slope, one each for range_raw, slope_rec_raw, range_delta, range_ratio, slope_rec_delta and
 slope_rec_ratio, one each for the eight A0 / auc / slope_init / slope_final
 _delta and _ratio traits, and one per
-normalization with a panel per --range_fracs value for the t_p<N> traits.
+normalization (raw, delta, ratio) with a panel per --range_fracs value for the t_p<N> traits.
 The plots of the post-normalization traits (range, slope_rec, the _delta / _ratio
 A0, auc and slopes, and t_p<N>) leave out the
-control (0 mM) dose; the CSV still lists every well.
+control (0 mM) dose; the _raw ones keep it; the CSV still lists every well.
 
 Separately from the traits, it also plots the control-normalized activity
 time-course: each well's activity at every timepoint is normalized to the
@@ -75,7 +82,7 @@ Each is shown per strain as median +/- quartiles across wells, one line per
 dose. For each non-control dose it also saves a figure with all strains
 overlaid (curve_traits_<metric>_timecourse_<delta|ratio>_all_strains_<dose>.png,
 median +/- quartiles). Dose sessions are matched by nearest elapsed time within
---time_tol_min. All traits except the range, slope_rec and t_p<N> ones are computed on the
+--time_tol_min. All traits except the _delta / _ratio ones are computed on the
 raw activity; those use each well's own control-normalized curve.
 
 Usage:
@@ -574,6 +581,7 @@ def main():
         final_spans.append(t[-1] - t[-min(args.final_slope_points, len(t))])
         curves = {mode: normalized[mode][1].get((dose, strain, well), []) if mode in normalized else []
                   for mode in NORMALIZATIONS}
+        raw_curve = list(zip(t.tolist(), y.tolist()))
         ranges = {mode: compute_range(curve) for mode, curve in curves.items()}
         rows.append({
             "dose": dose,
@@ -588,6 +596,9 @@ def main():
             "auc_norm": compute_auc_norm(auc, A0),
             "slope_init": compute_slope_init(t, y, args.slope_points),
             "slope_final": compute_slope_final(t, y, args.final_slope_points),
+            "range_raw": compute_range(raw_curve),
+            "slope_rec_raw": compute_slope_recovery(raw_curve, args.rec_min_window_min),
+            **{f"t_p{p * 100:g}_raw": compute_time_to_fraction(raw_curve, p) for p in args.range_fracs},
             "range_delta": ranges["delta"],
             "range_ratio": ranges["ratio"],
             "slope_rec_delta": compute_slope_recovery(curves["delta"], args.rec_min_window_min),
@@ -621,6 +632,22 @@ def main():
                                           f"{np.median(final_spans) / 60:.0f} h")],
                          None,
                          f"curve_traits_{args.metric}_slope_final.png",
+                         output_dir=output_dir, show=args.show)
+        plot_trait_boxes(rows,
+                         [("range_raw", f"First - min of {args.metric} (A.U.)")],
+                         None,
+                         f"curve_traits_{args.metric}_range_raw.png",
+                         output_dir=output_dir, show=args.show)
+        plot_trait_boxes(rows,
+                         [("slope_rec_raw", f"Recovery slope of {args.metric} (A.U./min)")],
+                         None,
+                         f"curve_traits_{args.metric}_slope_rec_raw.png",
+                         output_dir=output_dir, show=args.show)
+        plot_trait_boxes(rows,
+                         [(f"t_p{p * 100:g}_raw", f"Time to {args.metric} <= first - {p:g} x range (min)")
+                          for p in args.range_fracs],
+                         None,
+                         f"curve_traits_{args.metric}_time_to_fraction_raw.png",
                          output_dir=output_dir, show=args.show)
         if normalized:
             plot_trait_boxes(rows,

@@ -1,18 +1,23 @@
-Figure 4 - curve traits of the CeDiv strains across levamisole dose (23 traits x 12 strains x 3 doses, 3 trials)
+Figure 4 - curve traits of the CeDiv strains across levamisole dose (27 traits x 12 strains x 3 doses, 3 trials)
 ==============================================================================================================
 
-Output: Fig4.svg (+ Fig4.png, 300 dpi); 3 panels per row (layout of the merged H2 plot), one panel per trait in the same order, strain legend on top in two rows.
+Output: Fig4.svg (+ Fig4.png, 300 dpi); 3 panels per row (layout of the merged H2 plot), one panel per trait, 9 rows,
+  each row = raw / delta / ratio version of a trait; strain legend on top in two rows.
+  auc_norm is calculated and kept in data/Fig4_data.csv but not plotted.
 Script: generate_Fig4.py.  data/Fig4_data.csv = per-trial strain means (trial, strain, dose_mM, trait, value, n_wells) behind the plot.
 
 Data: curve_traits_ActValS_per_well.csv (Ce_div_set_analysis\curve_traits.py) of the three official trials
   10102026_CeDiv_Leva_test02 (10 strains, no EG4725 / JU258), 10212026_CeDiv_Leva_test03, 10312026_CeDiv_Leva_test04
   base: C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Data_Backup\My_Passport_6TB_Andersen_Lab_1
+  The per-well CSVs need the *_raw traits (range_raw, t_p10/50/90_raw, slope_rec_raw), i.e. curve_traits.py re-run with the same
+  settings as before (--slope_points 5 --final_slope_points 9, plus --time_tol_min 10 for test03 / test04); the older columns do not change.
 
 Statistic (as Fig 3): per trial, strain, dose and trait, mean of the strain's wells (NaN values skipped).
 Point = mean of those trial means, error bar = sample SD (ddof = 1) across trials.
 EG4725 and JU258: 2 trials; all other strains: 3 trials.
-Traits normalized to the strain's own 0 mM control (*_delta, *_ratio, range_*, slope_rec_*, t_p*_*) are excluded at 0 mM
-(same rule as the H2 analysis), so they show the two treated doses only.
+Traits normalized to the strain's own 0 mM control (*_delta, *_ratio) are excluded at 0 mM
+(same rule as the H2 analysis), so they show the two treated doses only. The *_raw traits are computed on the raw
+activity curve and are shown at all three doses.
 
 Command (run from this folder; pandas + matplotlib; Arial must be installed):
 python generate_Fig4.py --base_dir "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Data_Backup\My_Passport_6TB_Andersen_Lab_1" --export_data data\Fig4_data.csv --dpi 300 --also_png --output_prefix Fig4
@@ -21,4 +26,4 @@ Redraw without the trial folders:
 python generate_Fig4.py --data data\Fig4_data.csv --dpi 300 --also_png --output_prefix Fig4
 
 Subset of traits for the main figure, e.g.:
-python generate_Fig4.py --data data\Fig4_data.csv --traits auc auc_norm A0_ratio range_ratio --ncols 2
+python generate_Fig4.py --data data\Fig4_data.csv --traits auc A0_ratio range_raw range_ratio --ncols 2

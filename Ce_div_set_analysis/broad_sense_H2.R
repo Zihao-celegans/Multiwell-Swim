@@ -4,7 +4,8 @@ library(tidyverse)
 # ---- edit these ----
 args <- commandArgs(trailingOnly = TRUE)
 traits_csv <- if (length(args) >= 1) args[1] else "C:/Users/jl200/Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1/10102026_CeDiv_Leva_test02/traits/curve_traits_ActValS_per_well.csv"
-raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final")
+raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final",
+                "range_raw", "slope_rec_raw", "t_p10_raw", "t_p50_raw", "t_p90_raw")
 # Normalized to each strain's own control, so control wells carry no strain signal
 normalized_traits <- c("range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
                        "t_p10_delta", "t_p50_delta", "t_p90_delta",

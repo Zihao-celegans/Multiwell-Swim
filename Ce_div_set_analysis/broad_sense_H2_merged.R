@@ -4,7 +4,7 @@ library(tidyverse)
 # Usage: Rscript broad_sense_H2_merged.R <output folder name> <trial folder> <trial folder> [<trial folder> ...]
 # With no arguments it merges test02 + test03 into Merged_CeDiv_Leva_test02_test03.
 args <- commandArgs(trailingOnly = TRUE)
-base <- "C:/Users/jl200/Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1"
+base <- Sys.getenv("MULTIWELL_BASE", file.path(Sys.getenv("USERPROFILE"), "Dropbox/JHU_2026_spring/Multiwell_swim/Data_Backup/My_Passport_6TB_Andersen_Lab_1"))
 if (length(args) >= 3) {
   out_name <- args[1]
   trial_folders <- args[-1]
@@ -15,7 +15,8 @@ if (length(args) >= 3) {
 # Trial label = the "testNN" suffix of the folder name
 trials <- setNames(trial_folders, sub(".*_(test[0-9]+)$", "\\1", trial_folders))
 out_dir <- file.path(base, out_name)
-raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final")
+raw_traits <- c("A0", "auc", "auc_norm", "slope_init", "slope_final",
+                "range_raw", "slope_rec_raw", "t_p10_raw", "t_p50_raw", "t_p90_raw")
 # Normalized to each strain's own control, so control wells carry no strain signal
 normalized_traits <- c("range_delta", "range_ratio", "slope_rec_delta", "slope_rec_ratio",
                        "t_p10_delta", "t_p50_delta", "t_p90_delta",
@@ -103,12 +104,15 @@ trait_order <- c("A0", "A0_delta", "A0_ratio",
                  "auc", "auc_delta", "auc_ratio",
                  "slope_init", "slope_init_delta", "slope_init_ratio",
                  "slope_final", "slope_final_delta", "slope_final_ratio",
-                 "auc_norm", "range_delta", "range_ratio",
-                 "t_p10_delta", "t_p50_delta", "t_p90_delta",
-                 "t_p10_ratio", "t_p50_ratio", "t_p90_ratio",
-                 "slope_rec_delta", "slope_rec_ratio")
-stopifnot(setequal(trait_order, c(raw_traits, normalized_traits)))
+                 "range_raw", "range_delta", "range_ratio",
+                 "t_p10_raw", "t_p10_delta", "t_p10_ratio",
+                 "t_p50_raw", "t_p50_delta", "t_p50_ratio",
+                 "t_p90_raw", "t_p90_delta", "t_p90_ratio",
+                 "slope_rec_raw", "slope_rec_delta", "slope_rec_ratio")
+# auc_norm is analysed (in the CSV) but not plotted
+stopifnot(setequal(c(trait_order, "auc_norm"), c(raw_traits, normalized_traits)))
 p <- plot_data %>%
+  filter(trait %in% trait_order) %>%
   mutate(trait = factor(trait, levels = trait_order),
          dose_label = factor(dose_mM, levels = sort(unique(dose_mM)))) %>%
   ggplot(aes(dose_label, H2, colour = group, group = group)) +
