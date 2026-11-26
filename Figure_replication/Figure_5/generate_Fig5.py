@@ -1,4 +1,4 @@
-"""Figure 4: curve traits of the CeDiv strains across levamisole dose, one panel per trait.
+"""Figure 5: curve traits of the CeDiv strains across levamisole dose, one panel per trait.
 
 Each point is the mean +/- SD (sample SD, ddof = 1) across trials of the per-trial strain mean
 (mean trait value of that strain's wells at one dose in one trial), as in Fig 3. Strains missing from a
@@ -13,10 +13,10 @@ Input: the per-well trait tables written by `Ce_div_set_analysis\\curve_traits.p
 (<trial>\\traits\\curve_traits_ActValS_per_well.csv).
 
 Example (from the trial folders; also writes the per-trial means used):
-    python generate_Fig4.py --base_dir "<...>\\My_Passport_6TB_Andersen_Lab_1" --export_data data\\Fig4_data.csv
+    python generate_Fig5.py --base_dir "<...>\\My_Passport_6TB_Andersen_Lab_1" --export_data data\\Fig5_data.csv
 
 Redraw from the exported CSV alone:
-    python generate_Fig4.py --data data\\Fig4_data.csv
+    python generate_Fig5.py --data data\\Fig5_data.csv
 """
 
 import argparse
@@ -134,7 +134,7 @@ def main():
     p.add_argument("--legend_height", type=float, default=0.4, help="Space reserved on top for the legend, inches")
     p.add_argument("--dpi", type=int, default=300)
     p.add_argument("--also_png", action="store_true", help="Also save a PNG next to the SVG")
-    p.add_argument("--output_prefix", default="Fig4", help="Writes <prefix>.svg")
+    p.add_argument("--output_prefix", default="Fig5", help="Writes <prefix>.svg")
     args = p.parse_args()
 
     if args.data:
