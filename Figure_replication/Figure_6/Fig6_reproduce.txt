@@ -1,0 +1,31 @@
+Figure 6 - broad-sense heritability (H2) of the curve traits by trait version, coloured by levamisole dose (9 trait groups x 3 versions x 3 doses)
+==============================================================================================================
+
+Output: Fig6.svg (+ Fig6.png, 300 dpi), page 7.5 x 7.5 in (fixed, --size); 3 x 3 panels A-I, one panel per trait symbol of Fig 5
+  (A_0, R, AUC, k_init, k_final, k_rec, t_10, t_50, t_90; same order as the rows of Fig 5, row by row).
+  x axis of a panel = the three versions of the trait, labelled with the full math symbols, e.g. A_0, A_{0,Δ}, A_{0,r}
+  (Δ = control-subtracted, r = control-divided, no extra subscript = raw activity); no symbol above the y axis.
+  Dose is colour-coded: 0 mM gray, 0.0125 mM blue, 0.025 mM pink; the doses of a version are spread around its tick
+  (--dodge, default 0.36 = spread of three doses), centred on the tick, so Δ and r (no 0 mM) show two points centred on the tick. Legend (error-bar handles) inside panel A, upper right, in the
+  format of Fig 2B: title "LEV dose" on top, the doses with unit (0 mM / 0.0125 mM / 0.025 mM) below.
+  y axis H2, 0-1 with ticks every 0.2, labelled in every panel; the bold panel letter A-I sits left of the H2 label, top-aligned with the y axis
+  (letters centred on a common x per column; the first column's letters touch the left page edge; columns spaced evenly, --col_gap),
+  and the legend title in panel A is level with the top of the letter A.
+Script: generate_Fig6.py.  data/Fig6_data.csv = the plotted values (group, mode, trait, dose_mM, H2, lower_5, upper_95, n_strains, n_wells).
+
+Data: curve_traits_ActValS_merged_broad_sense_H2.csv (Ce_div_set_analysis\broad_sense_H2_merged.R), rows with strain_set == all_strains,
+  folder Merged_CeDiv_Leva_test02_test03_test04 of
+  base: C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Data_Backup\My_Passport_6TB_Andersen_Lab_1
+  (trials test02 + test03 + test04, 12 strains; see Commands_used.txt in that folder).
+
+Statistic: merged H2 = Vg / (Vg + Ve) from lmer(value ~ trial + (1|strain)) per dose and trait.
+Error bar = 5th-95th percentile of a 100-rep bootstrap (wells resampled within strain x trial, set.seed(1)); drawn as stored, so
+a point can lie just outside its bar (t_p10_delta at 0.025 mM: H2 0.062, bar 0.064-0.147).
+Delta / ratio traits are not defined at 0 mM (control wells are their own reference), so they start at 0.0125 mM.
+auc_norm is not shown.
+
+Command (run from this folder; pandas + matplotlib; Arial must be installed):
+python generate_Fig6.py --base_dir "C:\Users\jl200\Dropbox\JHU_2026_spring\Multiwell_swim\Data_Backup\My_Passport_6TB_Andersen_Lab_1" --export_data data\Fig6_data.csv --dpi 300 --also_png --output_prefix Fig6
+
+Redraw without the trial folders:
+python generate_Fig6.py --data data\Fig6_data.csv --dpi 300 --also_png --output_prefix Fig6
